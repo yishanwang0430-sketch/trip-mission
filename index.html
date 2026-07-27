@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#25313c" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="旅途密令" />
+    <title>旅途密令</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="assets/app-icon-192.png" />
+    <link rel="apple-touch-icon" href="assets/app-icon-192.png" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand-lockup">
+          <img class="brand-mark" src="assets/app-icon-96.png" alt="" />
+          <div>
+            <div class="brand-name">旅途密令</div>
+            <div class="brand-date" id="header-date"></div>
+          </div>
+        </div>
+        <button class="icon-button" id="privacy-toggle" type="button" aria-label="隐藏分数" title="隐藏分数">
+          <i data-lucide="eye"></i>
+        </button>
+      </header>
+
+      <main>
+        <section class="view is-active" id="view-missions" data-view="missions">
+          <div class="score-strip" aria-label="今日任务概况">
+            <div>
+              <span>总分</span>
+              <strong id="total-score">0</strong>
+            </div>
+            <div>
+              <span>今日</span>
+              <strong id="today-score">0</strong>
+            </div>
+            <div>
+              <span>剩余</span>
+              <strong id="remaining-draws">2</strong>
+            </div>
+          </div>
+
+          <button class="review-alert" id="review-alert" type="button" hidden>
+            <i data-lucide="clock-3"></i>
+            <span>今日复盘时间到了</span>
+            <i data-lucide="chevron-right"></i>
+          </button>
+
+          <section class="mission-stage" aria-live="polite">
+            <div class="empty-state" id="empty-task">
+              <img src="assets/app-icon-192.png" alt="" />
+              <h1>抽取今天的密令</h1>
+              <p id="empty-task-note">当前有 2 次机会</p>
+              <button class="primary-button" id="draw-task" type="button">
+                <i data-lucide="dices"></i>
+                <span>随机抽取</span>
+              </button>
+            </div>
+
+            <article class="mission-card" id="active-task" hidden>
+              <div class="mission-watermark" aria-hidden="true"></div>
+              <header class="mission-meta">
+                <span class="points-badge" id="task-points">1 分</span>
+                <span class="task-target" id="task-target"></span>
+                <span class="task-timer" id="task-timer"></span>
+              </header>
+              <div class="mission-body is-concealed" id="mission-body">
+                <div class="mission-code" id="task-code"></div>
+                <h1 id="task-title"></h1>
+                <p id="task-description"></p>
+                <div class="conceal-cover" id="conceal-cover">
+                  <button class="reveal-button" id="reveal-task" type="button">
+                    <i data-lucide="scan-eye"></i>
+                    <span>查看密令</span>
+                  </button>
+                </div>
+              </div>
+              <footer class="mission-actions">
+                <button class="secondary-button danger-text" id="abandon-task" type="button">
+                  <i data-lucide="x"></i>
+                  <span>放弃</span>
+                </button>
+                <button class="primary-button" id="complete-task" type="button">
+                  <i data-lucide="check"></i>
+                  <span>计成</span>
+                </button>
+              </footer>
+            </article>
+          </section>
+
+          <section class="section-block">
+            <div class="section-heading">
+              <h2>最近记录</h2>
+              <button class="text-button" type="button" data-go="review">查看全部</button>
+            </div>
+            <div class="record-list" id="recent-records"></div>
+          </section>
+        </section>
+
+        <section class="view" id="view-review" data-view="review">
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">每日复盘</span>
+              <h1 id="review-date-title"></h1>
+            </div>
+            <input class="date-input" id="review-date" type="date" aria-label="选择复盘日期" />
+          </div>
+
+          <div class="review-summary">
+            <div><span>得分</span><strong id="review-score">0</strong></div>
+            <div><span>完成</span><strong id="review-completed">0</strong></div>
+            <div><span>未成</span><strong id="review-failed">0</strong></div>
+          </div>
+
+          <section class="section-block">
+            <div class="section-heading"><h2>密令明细</h2></div>
+            <div class="record-list" id="review-records"></div>
+          </section>
+
+          <section class="review-controls">
+            <label class="toggle-row">
+              <span>
+                <strong>今日在场</strong>
+                <small>用于计算场均分</small>
+              </span>
+              <input id="attendance-toggle" type="checkbox" />
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+            <label class="toggle-row">
+              <span>
+                <strong>最佳妙计 +1</strong>
+                <small>每日复盘时全员投票一次</small>
+              </span>
+              <input id="bonus-toggle" type="checkbox" />
+              <span class="switch" aria-hidden="true"></span>
+            </label>
+          </section>
+
+          <textarea class="review-note" id="review-note" maxlength="120" placeholder="今天最好笑或最漂亮的一次设局"></textarea>
+
+          <div class="stacked-actions">
+            <button class="primary-button" id="share-review" type="button">
+              <i data-lucide="share-2"></i>
+              <span>分享今日复盘</span>
+            </button>
+            <button class="secondary-button" id="finish-review" type="button">
+              <i data-lucide="circle-check-big"></i>
+              <span>完成复盘</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="view" id="view-ranking" data-view="ranking">
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">同行总榜</span>
+              <h1>按场均分排序</h1>
+            </div>
+            <button class="icon-button" id="reset-ranking" type="button" aria-label="清空他人录分" title="清空他人录分">
+              <i data-lucide="rotate-ccw"></i>
+            </button>
+          </div>
+
+          <div class="ranking-head">
+            <span>玩家</span><span>总分</span><span>在场日</span><span>场均</span>
+          </div>
+          <div class="ranking-list" id="ranking-list"></div>
+        </section>
+
+        <section class="view" id="view-settings" data-view="settings">
+          <div class="page-heading">
+            <div>
+              <span class="eyebrow">设置</span>
+              <h1>本机玩家</h1>
+            </div>
+          </div>
+
+          <section class="settings-section">
+            <label class="field-label" for="self-player">我的代号</label>
+            <select id="self-player"></select>
+            <label class="field-label" for="self-name">我的名字</label>
+            <input id="self-name" type="text" maxlength="12" placeholder="输入名字或昵称" />
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-title">
+              <div><strong>每日抽取次数</strong><small>已抽出的任务不能重抽</small></div>
+              <div class="segmented-control" id="daily-limit-control">
+                <button type="button" data-limit="1">1</button>
+                <button type="button" data-limit="2">2</button>
+                <button type="button" data-limit="3">3</button>
+              </div>
+            </div>
+            <label class="field-label" for="review-time">每日复盘时间</label>
+            <input id="review-time" type="time" />
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-title">
+              <div><strong>当前在场玩家</strong><small>随机目标只会从这里产生</small></div>
+            </div>
+            <div class="roster-grid" id="roster-grid"></div>
+          </section>
+
+          <section class="settings-section compact-actions">
+            <button class="secondary-button" id="export-data" type="button">
+              <i data-lucide="download"></i><span>导出记录</span>
+            </button>
+            <button class="secondary-button" id="import-data" type="button">
+              <i data-lucide="upload"></i><span>导入记录</span>
+            </button>
+            <input id="import-file" type="file" accept="application/json" hidden />
+            <button class="secondary-button danger-text" id="reset-data" type="button">
+              <i data-lucide="trash-2"></i><span>清空本机数据</span>
+            </button>
+          </section>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="nav-item is-active" type="button" data-nav="missions">
+          <i data-lucide="dices"></i><span>任务</span>
+        </button>
+        <button class="nav-item" type="button" data-nav="review">
+          <i data-lucide="clipboard-check"></i><span>复盘</span>
+        </button>
+        <button class="nav-item" type="button" data-nav="ranking">
+          <i data-lucide="trophy"></i><span>总榜</span>
+        </button>
+        <button class="nav-item" type="button" data-nav="settings">
+          <i data-lucide="settings"></i><span>设置</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="modal-backdrop" id="onboarding-modal" hidden>
+      <section class="modal onboarding-modal" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <img src="assets/app-icon-192.png" alt="" />
+        <span class="eyebrow">首次进入</span>
+        <h1 id="onboarding-title">选择你的代号</h1>
+        <div class="player-picker" id="onboarding-player-picker"></div>
+        <label class="field-label" for="onboarding-name">名字或昵称</label>
+        <input id="onboarding-name" maxlength="12" placeholder="例如：小王" />
+        <button class="primary-button" id="start-app" type="button">
+          <span>进入任务</span><i data-lucide="arrow-right"></i>
+        </button>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="complete-modal" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="complete-title">
+        <div class="modal-heading">
+          <div><span class="eyebrow">任务确认</span><h2 id="complete-title">选择见证人</h2></div>
+          <button class="icon-button" type="button" data-close-modal="complete-modal" aria-label="关闭"><i data-lucide="x"></i></button>
+        </div>
+        <label class="field-label" for="witness-select">见证人</label>
+        <select id="witness-select"></select>
+        <label class="field-label" for="completion-note">现场备注（可选）</label>
+        <textarea id="completion-note" maxlength="80" placeholder="例如：在餐厅点菜时触发"></textarea>
+        <button class="primary-button" id="confirm-complete" type="button">
+          <i data-lucide="check"></i><span>确认得分</span>
+        </button>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="confirm-modal" hidden>
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div class="modal-heading">
+          <div><span class="eyebrow">确认操作</span><h2 id="confirm-title"></h2></div>
+        </div>
+        <p class="modal-copy" id="confirm-copy"></p>
+        <div class="modal-actions">
+          <button class="secondary-button" id="confirm-cancel" type="button">取消</button>
+          <button class="primary-button danger-button" id="confirm-ok" type="button">确认</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="assets/lucide.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
