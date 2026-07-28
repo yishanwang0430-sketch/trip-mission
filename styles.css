@@ -107,6 +107,55 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
+.topbar-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.room-status {
+  display: flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.room-status span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-dot,
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 8px;
+  border-radius: 50%;
+  background: #aab1b7;
+}
+
+.connection-dot.is-online,
+.presence-dot.is-online {
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--green-soft);
+}
+
+.connection-dot.is-connecting {
+  background: var(--gold);
+}
+
 main {
   min-height: calc(100vh - 136px);
   padding-bottom: calc(86px + env(safe-area-inset-bottom));
@@ -729,6 +778,20 @@ textarea {
   text-align: center;
 }
 
+.rank-score-value,
+.rank-days-value {
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.rank-name-wrap {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
 .settings-section {
   display: grid;
   gap: 10px;
@@ -953,6 +1016,135 @@ textarea {
   margin-top: 22px;
 }
 
+.room-modal input {
+  width: 100%;
+  margin-bottom: 14px;
+}
+
+.room-code-input {
+  font-size: 22px;
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+
+.room-entry-actions {
+  margin-top: 4px;
+}
+
+.room-service-state {
+  min-height: 20px;
+  margin-top: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.room-service-state.is-error {
+  color: var(--coral-dark);
+}
+
+.room-code-panel {
+  display: grid;
+  min-height: 116px;
+  place-items: center;
+  padding: 14px;
+  border: 1px solid #bed5e4;
+  border-radius: 8px;
+  background: var(--blue-soft);
+}
+
+.room-code-panel span,
+.room-code-panel small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.room-code-panel strong {
+  color: var(--blue);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+}
+
+.room-member-list {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+}
+
+.room-member {
+  display: grid;
+  min-height: 44px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 5px 9px;
+  border-bottom: 1px solid var(--line);
+}
+
+.room-member-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.room-member-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.room-review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.room-review-item {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.room-review-item .roster-code {
+  width: 36px;
+  height: 36px;
+}
+
+.room-review-copy {
+  min-width: 0;
+}
+
+.room-review-copy strong,
+.room-review-copy small {
+  display: block;
+}
+
+.room-review-copy small {
+  margin-top: 3px;
+  color: var(--muted);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.review-bonus {
+  padding: 4px 7px;
+  color: var(--gold);
+  border-radius: 6px;
+  background: var(--gold-soft);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .toast {
   position: fixed;
   z-index: 200;
@@ -991,6 +1183,17 @@ textarea {
 
   .topbar {
     padding-inline: 14px;
+  }
+
+  .brand-mark {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .room-status {
+    max-width: 116px;
+    padding-inline: 8px;
   }
 
   .mission-body h1 {

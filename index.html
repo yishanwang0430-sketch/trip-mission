@@ -23,9 +23,15 @@
             <div class="brand-date" id="header-date"></div>
           </div>
         </div>
-        <button class="icon-button" id="privacy-toggle" type="button" aria-label="隐藏分数" title="隐藏分数">
-          <i data-lucide="eye"></i>
-        </button>
+        <div class="topbar-actions">
+          <button class="room-status" id="room-status" type="button" aria-label="同行房间">
+            <span class="connection-dot" id="connection-dot"></span>
+            <span id="room-status-label">加入房间</span>
+          </button>
+          <button class="icon-button" id="privacy-toggle" type="button" aria-label="隐藏分数" title="隐藏分数">
+            <i data-lucide="eye"></i>
+          </button>
+        </div>
       </header>
 
       <main>
@@ -122,6 +128,11 @@
             <div class="record-list" id="review-records"></div>
           </section>
 
+          <section class="section-block room-review-section" id="room-review-section" hidden>
+            <div class="section-heading"><h2>同行复盘</h2></div>
+            <div class="room-review-list" id="room-review-list"></div>
+          </section>
+
           <section class="review-controls">
             <label class="toggle-row">
               <span>
@@ -159,7 +170,7 @@
           <div class="page-heading">
             <div>
               <span class="eyebrow">同行总榜</span>
-              <h1>按场均分排序</h1>
+              <h1 id="ranking-title">按场均分排序</h1>
             </div>
             <button class="icon-button" id="reset-ranking" type="button" aria-label="清空他人录分" title="清空他人录分">
               <i data-lucide="rotate-ccw"></i>
@@ -268,6 +279,48 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="room-modal" hidden>
+      <section class="modal room-modal" role="dialog" aria-modal="true" aria-labelledby="room-modal-title">
+        <div class="modal-heading">
+          <div><span class="eyebrow">多人联机</span><h2 id="room-modal-title">同行房间</h2></div>
+          <button class="icon-button" type="button" data-close-modal="room-modal" aria-label="关闭"><i data-lucide="x"></i></button>
+        </div>
+
+        <div id="room-disconnected">
+          <label class="field-label" for="room-player-name">名字或昵称</label>
+          <input id="room-player-name" type="text" maxlength="12" placeholder="例如：小王" />
+          <label class="field-label" for="room-code-input">房间号</label>
+          <input class="room-code-input" id="room-code-input" type="text" maxlength="6" inputmode="numeric" autocomplete="one-time-code" placeholder="6 位数字" />
+          <div class="modal-actions room-entry-actions">
+            <button class="secondary-button" id="create-room" type="button">
+              <i data-lucide="plus"></i><span>创建房间</span>
+            </button>
+            <button class="primary-button" id="join-room" type="button">
+              <i data-lucide="log-in"></i><span>加入房间</span>
+            </button>
+          </div>
+          <div class="room-service-state" id="room-service-state"></div>
+        </div>
+
+        <div id="room-connected" hidden>
+          <div class="room-code-panel">
+            <span>房间号</span>
+            <strong id="room-code-display">000000</strong>
+            <small id="room-online-summary">1 人在线</small>
+          </div>
+          <div class="room-member-list" id="room-member-list"></div>
+          <div class="stacked-actions">
+            <button class="primary-button" id="copy-room-link" type="button">
+              <i data-lucide="link"></i><span>复制邀请链接</span>
+            </button>
+            <button class="secondary-button danger-text" id="leave-room" type="button">
+              <i data-lucide="log-out"></i><span>退出本机房间</span>
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="confirm-modal" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
         <div class="modal-heading">
@@ -283,6 +336,9 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
 
+    <script src="supabase-config.js"></script>
+    <script src="assets/supabase.min.js"></script>
+    <script src="room.js"></script>
     <script src="assets/lucide.min.js"></script>
     <script src="app.js"></script>
   </body>

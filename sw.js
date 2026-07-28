@@ -1,11 +1,14 @@
-const CACHE_NAME = "travel-secret-missions-v2";
+const CACHE_NAME = "travel-secret-missions-v4";
 const ASSETS = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
+  "./room.js",
+  "./supabase-config.js",
   "./manifest.webmanifest",
   "./assets/lucide.min.js",
+  "./assets/supabase.min.js",
   "./assets/app-icon-96.png",
   "./assets/app-icon-192.png",
   "./assets/app-icon-512.png"

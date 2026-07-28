@@ -85,6 +85,17 @@ let state = loadState();
 let onboardingSelection = state.selfId || "A";
 let confirmAction = null;
 let toastTimer = null;
+let syncingScores = false;
+const pendingInviteCode = new URL(location.href).searchParams.get("room")?.replace(/\D/g, "").slice(0, 6) || "";
+let roomSnapshot = window.tripRooms?.snapshot?.() || {
+  available: false,
+  connected: false,
+  status: "unavailable",
+  session: null,
+  players: [],
+  onlinePlayerIds: [],
+  reviewsByDate: {},
+};
 
 function saveState() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
@@ -166,6 +177,46 @@ function attendanceDays() {
   return Object.values(state.attendance).filter(Boolean).length;
 }
 
+function isInRoom() {
+  return Boolean(roomSnapshot.session);
+}
+
+function remoteSelf() {
+  if (!roomSnapshot.session) return null;
+  return roomSnapshot.players.find((player) => player.id === roomSnapshot.session.playerId) || null;
+}
+
+function currentTotalScore() {
+  const remote = remoteSelf();
+  if (!remote) return totalScore();
+  const pending = state.history
+    .filter((record) => record.status === "completed" && record.roomCode === roomSnapshot.session.roomCode && record.syncStatus !== "synced")
+    .reduce((sum, record) => sum + record.score, 0);
+  return Number(remote.totalScore) + pending;
+}
+
+function applyRoomSnapshot(nextSnapshot) {
+  roomSnapshot = nextSnapshot;
+  if (!nextSnapshot.session || !nextSnapshot.players.length) return;
+  const onlineIds = new Set(nextSnapshot.onlinePlayerIds);
+  state.selfId = nextSnapshot.session.seat;
+  state.roster = PLAYER_IDS.map((id) => {
+    const existing = state.roster.find((player) => player.id === id) || { id, name: `玩家${id}`, active: false };
+    const remote = nextSnapshot.players.find((player) => player.seat === id);
+    if (!remote) return { ...existing, name: `玩家${id}`, active: false };
+    return {
+      ...existing,
+      name: remote.name,
+      active: remote.id === nextSnapshot.session.playerId || onlineIds.has(remote.id),
+    };
+  });
+  state.leaderboard = Object.fromEntries(nextSnapshot.players.map((player) => [
+    player.seat,
+    { total: Number(player.totalScore) || 0, days: Number(player.attendanceDays) || 0 },
+  ]));
+  saveState();
+}
+
 function drawsForToday() {
   const today = dateKey();
   return recordsFor(today).length + (state.activeTask?.dateKey === today ? 1 : 0);
@@ -242,17 +293,21 @@ function expireTaskIfNeeded() {
 function resolveActiveTask(status, witnessId = null, note = "", shouldRender = true) {
   if (!state.activeTask) return;
   const task = state.activeTask;
-  state.history.push({
+  const record = {
     ...task,
     status,
     awarded: status === "completed" ? task.score : 0,
     witnessId,
     note,
     resolvedAt: Date.now(),
-  });
+    roomCode: status === "completed" ? roomSnapshot.session?.roomCode || null : null,
+    syncStatus: status === "completed" && roomSnapshot.session ? "pending" : null,
+  };
+  state.history.push(record);
   state.activeTask = null;
   saveState();
   if (shouldRender) renderAll();
+  return record;
 }
 
 function revealMission() {
@@ -269,10 +324,27 @@ function renderHeader() {
   button.innerHTML = `<i data-lucide="${state.settings.scoresHidden ? "eye-off" : "eye"}"></i>`;
   button.setAttribute("aria-label", state.settings.scoresHidden ? "显示分数" : "隐藏分数");
   button.title = state.settings.scoresHidden ? "显示分数" : "隐藏分数";
+  renderRoomStatus();
+}
+
+function renderRoomStatus() {
+  const label = $("#room-status-label");
+  const dot = $("#connection-dot");
+  dot.className = "connection-dot";
+  if (roomSnapshot.session) {
+    const onlineCount = Math.max(1, roomSnapshot.onlinePlayerIds.length);
+    label.textContent = `${roomSnapshot.session.roomCode} · ${onlineCount}在线`;
+    dot.classList.add(roomSnapshot.connected ? "is-online" : "is-connecting");
+  } else if (roomSnapshot.status === "connecting") {
+    label.textContent = "连接中";
+    dot.classList.add("is-connecting");
+  } else {
+    label.textContent = roomSnapshot.available ? "加入房间" : "本机模式";
+  }
 }
 
 function renderScoreStrip() {
-  $("#total-score").textContent = totalScore();
+  $("#total-score").textContent = currentTotalScore();
   $("#today-score").textContent = scoreFor(dateKey());
   $("#remaining-draws").textContent = remainingDraws();
 }
@@ -341,6 +413,7 @@ function recordStatusLabel(status) {
 
 function recordItemHtml(record) {
   const completed = record.status === "completed";
+  const statusLabel = completed && record.syncStatus === "pending" ? "待同步" : recordStatusLabel(record.status);
   return `
     <article class="record-item">
       <div class="record-score ${completed ? "" : "is-failed"}">${completed ? `+${record.score}` : "0"}</div>
@@ -348,7 +421,7 @@ function recordItemHtml(record) {
         <strong>${escapeHtml(record.taskId)} · ${escapeHtml(record.targetName)}</strong>
         <small>${escapeHtml(record.description)}</small>
       </div>
-      <div class="record-time">${recordStatusLabel(record.status)}<br>${formatTime(record.resolvedAt)}</div>
+      <div class="record-time">${statusLabel}<br>${formatTime(record.resolvedAt)}</div>
     </article>
   `;
 }
@@ -375,9 +448,61 @@ function renderReview() {
   $("#bonus-toggle").checked = Boolean(review.bonus);
   $("#review-note").value = review.note || "";
   $("#finish-review span").textContent = review.reviewed ? "已完成复盘" : "完成复盘";
+  renderRoomReviews(key);
+}
+
+function renderRoomReviews(key) {
+  const section = $("#room-review-section");
+  section.hidden = !isInRoom();
+  if (!isInRoom()) return;
+  const reviews = roomSnapshot.reviewsByDate[key] || [];
+  $("#room-review-list").innerHTML = reviews.length ? reviews.map((review) => `
+    <article class="room-review-item">
+      <span class="roster-code">${escapeHtml(review.seat)}</span>
+      <div class="room-review-copy">
+        <strong>${escapeHtml(review.name)}</strong>
+        <small>${escapeHtml(review.note || (review.reviewed ? "已完成复盘" : "暂无备注"))}</small>
+      </div>
+      ${review.bonus ? `<span class="review-bonus">+1</span>` : ""}
+    </article>
+  `).join("") : `<div class="empty-list">还没有同行复盘</div>`;
 }
 
 function renderRanking() {
+  const onlineIds = new Set(roomSnapshot.onlinePlayerIds);
+  const resetButton = $("#reset-ranking");
+  if (isInRoom()) {
+    resetButton.hidden = true;
+    $("#ranking-title").textContent = "房间实时排名";
+    const ranked = roomSnapshot.players
+      .map((player) => ({
+        ...player,
+        total: Number(player.totalScore) || 0,
+        days: Number(player.attendanceDays) || 0,
+        average: Number(player.attendanceDays) > 0 ? Number(player.totalScore) / Number(player.attendanceDays) : 0,
+      }))
+      .sort((a, b) => b.average - a.average || b.total - a.total || a.seat.localeCompare(b.seat));
+    $("#ranking-list").innerHTML = ranked.map((player, index) => {
+      const isSelf = player.id === roomSnapshot.session.playerId;
+      const isOnline = isSelf || onlineIds.has(player.id);
+      return `
+        <div class="ranking-row" data-player-id="${player.seat}">
+          <div class="rank-player">
+            <span class="rank-number">${index + 1}</span>
+            <span class="rank-avatar">${escapeHtml(player.seat)}</span>
+            <span class="rank-name-wrap"><span class="presence-dot ${isOnline ? "is-online" : ""}"></span><span class="rank-name">${escapeHtml(player.name)}${isSelf ? " · 我" : ""}</span></span>
+          </div>
+          <span class="rank-score-value rank-score">${player.total}</span>
+          <span class="rank-days-value">${player.days}</span>
+          <span class="rank-average">${player.average.toFixed(1)}</span>
+        </div>
+      `;
+    }).join("");
+    return;
+  }
+
+  resetButton.hidden = false;
+  $("#ranking-title").textContent = "按场均分排序";
   if (state.selfId) {
     state.leaderboard[state.selfId] = { total: totalScore(), days: attendanceDays() };
   }
@@ -409,19 +534,25 @@ function renderSettings() {
   const selfSelect = $("#self-player");
   selfSelect.innerHTML = state.roster.map((player) => `<option value="${player.id}">${escapeHtml(playerLabel(player.id))}</option>`).join("");
   selfSelect.value = state.selfId || "A";
+  selfSelect.disabled = isInRoom();
   $("#self-name").value = state.selfId ? playerById(state.selfId).name : "";
   $("#review-time").value = state.settings.reviewTime;
   $$("#daily-limit-control button").forEach((button) => {
     button.classList.toggle("is-active", Number(button.dataset.limit) === state.settings.dailyLimit);
   });
 
-  $("#roster-grid").innerHTML = state.roster.map((player) => `
+  const onlineIds = new Set(roomSnapshot.onlinePlayerIds);
+  $("#roster-grid").innerHTML = state.roster.map((player) => {
+    const remote = roomSnapshot.players.find((item) => item.seat === player.id);
+    const isOnline = remote && (remote.id === roomSnapshot.session?.playerId || onlineIds.has(remote.id));
+    return `
     <label class="roster-person ${player.active ? "is-active" : ""}" data-roster-id="${player.id}">
       <span class="roster-code">${player.id}</span>
-      <input class="roster-name-input" type="text" maxlength="12" value="${escapeHtml(player.name)}" aria-label="玩家${player.id}姓名" />
-      <input class="roster-active" type="checkbox" ${player.active ? "checked" : ""} aria-label="${escapeHtml(player.name)}当前在场" />
+      <input class="roster-name-input" type="text" maxlength="12" value="${escapeHtml(player.name)}" aria-label="玩家${player.id}姓名" ${isInRoom() ? "disabled" : ""} />
+      ${isInRoom() ? `<span class="presence-dot ${isOnline ? "is-online" : ""}" title="${isOnline ? "在线" : "离线"}"></span>` : `<input class="roster-active" type="checkbox" ${player.active ? "checked" : ""} aria-label="${escapeHtml(player.name)}当前在场" />`}
     </label>
-  `).join("");
+  `;
+  }).join("");
 }
 
 function renderReviewAlert() {
@@ -440,6 +571,91 @@ function renderOnboarding() {
   `).join("");
 }
 
+function renderRoomModal() {
+  const connected = isInRoom();
+  $("#room-disconnected").hidden = connected;
+  $("#room-connected").hidden = !connected;
+  if (!connected) {
+    if (document.activeElement !== $("#room-player-name")) {
+      $("#room-player-name").value = state.selfId ? playerById(state.selfId).name : "";
+    }
+    const busy = roomSnapshot.status === "connecting";
+    $("#create-room").disabled = busy || !roomSnapshot.available;
+    $("#join-room").disabled = busy || !roomSnapshot.available;
+    const serviceState = $("#room-service-state");
+    serviceState.classList.toggle("is-error", Boolean(roomSnapshot.error) || !roomSnapshot.available);
+    serviceState.textContent = busy
+      ? "正在连接…"
+      : roomSnapshot.error || (roomSnapshot.available ? "" : "联机服务尚未配置");
+    return;
+  }
+
+  const onlineIds = new Set(roomSnapshot.onlinePlayerIds);
+  const onlineCount = Math.max(1, onlineIds.size);
+  $("#room-code-display").textContent = roomSnapshot.session.roomCode;
+  $("#room-online-summary").textContent = `${onlineCount} 人在线 · ${roomSnapshot.players.length}/8 已加入`;
+  $("#room-member-list").innerHTML = roomSnapshot.players.map((player) => {
+    const isSelf = player.id === roomSnapshot.session.playerId;
+    const isOnline = isSelf || onlineIds.has(player.id);
+    return `
+      <div class="room-member">
+        <span class="roster-code">${escapeHtml(player.seat)}</span>
+        <span class="room-member-name">${escapeHtml(player.name)}${isSelf ? " · 我" : ""}</span>
+        <span class="room-member-state"><span class="presence-dot ${isOnline ? "is-online" : ""}"></span>${isOnline ? "在线" : "离线"}</span>
+      </div>
+    `;
+  }).join("");
+}
+
+async function syncPendingRoomScores() {
+  if (syncingScores || !roomSnapshot.connected || !roomSnapshot.session) return;
+  const pending = state.history.filter((record) =>
+    record.status === "completed"
+    && record.roomCode === roomSnapshot.session.roomCode
+    && record.syncStatus !== "synced"
+  );
+  if (!pending.length) return;
+  syncingScores = true;
+  try {
+    for (const record of pending) {
+      record.syncStatus = "syncing";
+      saveState();
+      try {
+        await window.tripRooms.recordTask(record, record.witnessId);
+        record.syncStatus = "synced";
+      } catch {
+        record.syncStatus = "pending";
+        break;
+      }
+      saveState();
+    }
+  } finally {
+    syncingScores = false;
+    saveState();
+    renderAll();
+  }
+}
+
+async function enterRoom(mode) {
+  const name = $("#room-player-name").value.trim() || (state.selfId ? playerById(state.selfId).name : "同行玩家");
+  try {
+    const next = mode === "create"
+      ? await window.tripRooms.createRoom(name)
+      : await window.tripRooms.joinRoom($("#room-code-input").value, name);
+    applyRoomSnapshot(next);
+    state.attendance[dateKey()] = true;
+    saveState();
+    renderAll();
+    closeModal("room-modal");
+    await window.tripRooms.setAttendance(dateKey(), true).catch(() => {});
+    await window.tripRooms.loadReviews(dateKey()).catch(() => {});
+    showToast(mode === "create" ? `房间 ${next.session.roomCode} 已创建` : `已加入房间 ${next.session.roomCode}`);
+  } catch (error) {
+    showToast(error?.message || "加入房间失败");
+    renderRoomModal();
+  }
+}
+
 function renderAll() {
   renderHeader();
   renderScoreStrip();
@@ -450,6 +666,7 @@ function renderAll() {
   renderSettings();
   renderReviewAlert();
   renderOnboarding();
+  renderRoomModal();
   if (window.lucide) window.lucide.createIcons();
 }
 
@@ -495,7 +712,7 @@ function buildReviewText(key) {
   const player = playerById(state.selfId);
   const lines = [
     `旅途密令 · ${formatDate(key, { month: "numeric", day: "numeric" })}`,
-    `${playerLabel(player.id)}：今日 ${scoreFor(key)} 分｜总分 ${totalScore()}｜场均 ${(totalScore() / Math.max(1, attendanceDays())).toFixed(1)}`,
+    `${playerLabel(player.id)}：今日 ${scoreFor(key)} 分｜总分 ${currentTotalScore()}｜场均 ${(currentTotalScore() / Math.max(1, attendanceDays())).toFixed(1)}`,
   ];
   for (const record of completed) lines.push(`+${record.score}｜${record.taskId}｜目标 ${record.targetName}`);
   if (state.reviews[key]?.bonus) lines.push("+1｜最佳妙计");
@@ -588,16 +805,21 @@ $("#abandon-task").addEventListener("click", () => {
   requestConfirm("放弃当前密令？", "本次抽取会计入今日次数，并记为 0 分。", () => resolveActiveTask("abandoned", null, "主动放弃"));
 });
 
-$("#confirm-complete").addEventListener("click", () => {
+$("#confirm-complete").addEventListener("click", async () => {
   const witnessId = $("#witness-select").value;
   if (!witnessId) {
     showToast("请选择一名见证人");
     return;
   }
   const points = state.activeTask?.score || 0;
-  resolveActiveTask("completed", witnessId, $("#completion-note").value.trim());
+  const record = resolveActiveTask("completed", witnessId, $("#completion-note").value.trim());
   closeModal("complete-modal");
-  showToast(`任务完成，获得 ${points} 分`);
+  if (record?.syncStatus === "pending") {
+    await syncPendingRoomScores();
+    showToast(record.syncStatus === "synced" ? `任务完成，${points} 分已同步` : `任务完成，${points} 分待联网同步`);
+  } else {
+    showToast(`任务完成，获得 ${points} 分`);
+  }
 });
 
 $("#confirm-cancel").addEventListener("click", () => {
@@ -619,33 +841,81 @@ $("#privacy-toggle").addEventListener("click", () => {
   if (window.lucide) window.lucide.createIcons();
 });
 
+$("#room-status").addEventListener("click", () => {
+  if (pendingInviteCode && !isInRoom()) $("#room-code-input").value = pendingInviteCode;
+  renderRoomModal();
+  $("#room-modal").hidden = false;
+  if (window.lucide) window.lucide.createIcons();
+});
+$("#room-code-input").addEventListener("input", (event) => {
+  event.target.value = event.target.value.replace(/\D/g, "").slice(0, 6);
+});
+$("#create-room").addEventListener("click", () => enterRoom("create"));
+$("#join-room").addEventListener("click", () => enterRoom("join"));
+$("#copy-room-link").addEventListener("click", async () => {
+  await copyText(window.tripRooms.inviteUrl());
+  showToast("邀请链接已复制");
+});
+$("#leave-room").addEventListener("click", () => {
+  requestConfirm("退出这个房间？", "只会清除本机连接，已同步的积分仍保留在房间中。", async () => {
+    await window.tripRooms.leaveRoom();
+    closeModal("room-modal");
+    showToast("已退出本机房间");
+  });
+});
+
 $("#review-alert").addEventListener("click", () => navigate("review"));
-$("#review-date").addEventListener("change", renderReview);
-$("#attendance-toggle").addEventListener("change", (event) => {
+$("#review-date").addEventListener("change", () => {
+  renderReview();
+  if (isInRoom()) window.tripRooms.loadReviews($("#review-date").value).catch(() => {});
+});
+$("#attendance-toggle").addEventListener("change", async (event) => {
   const key = $("#review-date").value;
   state.attendance[key] = event.target.checked;
   saveState();
   renderRanking();
+  if (isInRoom()) {
+    try {
+      await window.tripRooms.setAttendance(key, event.target.checked);
+    } catch (error) {
+      showToast(error?.message || "出勤同步失败");
+    }
+  }
 });
-$("#bonus-toggle").addEventListener("change", (event) => {
+$("#bonus-toggle").addEventListener("change", async (event) => {
   const key = $("#review-date").value;
   reviewFor(key).bonus = event.target.checked;
   saveState();
   renderScoreStrip();
   renderReview();
   renderRanking();
+  if (isInRoom()) {
+    try {
+      await window.tripRooms.saveReview(key, reviewFor(key));
+    } catch (error) {
+      showToast(error?.message || "复盘同步失败");
+    }
+  }
 });
 $("#review-note").addEventListener("input", (event) => {
   reviewFor($("#review-date").value).note = event.target.value;
   saveState();
 });
 $("#share-review").addEventListener("click", shareReview);
-$("#finish-review").addEventListener("click", () => {
+$("#finish-review").addEventListener("click", async () => {
   const key = $("#review-date").value;
   reviewFor(key).reviewed = true;
   saveState();
   renderReview();
   renderReviewAlert();
+  if (isInRoom()) {
+    try {
+      await window.tripRooms.saveReview(key, reviewFor(key));
+    } catch (error) {
+      showToast(error?.message || "复盘已保存本机，同步失败");
+      return;
+    }
+  }
   showToast("今日复盘已完成");
 });
 
@@ -676,17 +946,25 @@ $("#reset-ranking").addEventListener("click", () => {
 });
 
 $("#self-player").addEventListener("change", (event) => {
+  if (isInRoom()) return;
   state.selfId = event.target.value;
   playerById(state.selfId).active = true;
   state.attendance[dateKey()] = true;
   saveState();
   renderAll();
 });
-$("#self-name").addEventListener("change", (event) => {
+$("#self-name").addEventListener("change", async (event) => {
   if (!state.selfId) return;
   playerById(state.selfId).name = event.target.value.trim() || `玩家${state.selfId}`;
   saveState();
   renderAll();
+  if (isInRoom()) {
+    try {
+      await window.tripRooms.updateName(playerById(state.selfId).name);
+    } catch (error) {
+      showToast(error?.message || "名字同步失败");
+    }
+  }
 });
 $("#review-time").addEventListener("change", (event) => {
   state.settings.reviewTime = event.target.value || "21:30";
@@ -701,6 +979,7 @@ $("#daily-limit-control").addEventListener("click", (event) => {
   renderAll();
 });
 $("#roster-grid").addEventListener("change", (event) => {
+  if (isInRoom()) return;
   const item = event.target.closest("[data-roster-id]");
   if (!item) return;
   const player = playerById(item.dataset.rosterId);
@@ -718,6 +997,11 @@ $("#start-app").addEventListener("click", () => {
   state.attendance[dateKey()] = true;
   saveState();
   renderAll();
+  if (pendingInviteCode && !isInRoom()) {
+    $("#room-code-input").value = pendingInviteCode;
+    $("#room-player-name").value = playerById(state.selfId).name;
+    $("#room-modal").hidden = false;
+  }
 });
 
 $("#export-data").addEventListener("click", exportData);
@@ -746,8 +1030,25 @@ setInterval(() => {
   renderReviewAlert();
 }, 30000);
 
+window.tripRooms?.onChange((nextSnapshot) => {
+  applyRoomSnapshot(nextSnapshot);
+  renderAll();
+  syncPendingRoomScores();
+});
+
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
   window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
 }
 
 renderAll();
+window.tripRooms?.init().then((nextSnapshot) => {
+  applyRoomSnapshot(nextSnapshot);
+  renderAll();
+  if (nextSnapshot.session) {
+    window.tripRooms.loadReviews(dateKey()).catch(() => {});
+    syncPendingRoomScores();
+  } else if (pendingInviteCode && state.selfId) {
+    $("#room-code-input").value = pendingInviteCode;
+    $("#room-modal").hidden = false;
+  }
+});
