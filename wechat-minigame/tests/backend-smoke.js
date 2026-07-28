@@ -24,7 +24,7 @@ async function expectRpcError(name, params, code) {
 async function run() {
   const [ownerToken, witnessToken, thirdToken] = [randomUUID(), randomUUID(), randomUUID()];
   const created = await rpc("create_secret_room", {
-    p_name: "一山",
+    p_name: "自定义队长",
     p_device_token: ownerToken,
     p_max_players: 3,
   });
@@ -32,14 +32,26 @@ async function run() {
   let deleted = false;
 
   try {
-    await rpc("join_secret_room", { p_room_code: code, p_name: "阿禾", p_device_token: witnessToken });
-    const joined = await rpc("join_secret_room", { p_room_code: code, p_name: "小满", p_device_token: thirdToken });
+    await rpc("join_secret_room", { p_room_code: code, p_name: "Mars-7", p_device_token: witnessToken });
+    const joined = await rpc("join_secret_room", { p_room_code: code, p_name: "小王同学", p_device_token: thirdToken });
     assert.equal(joined.players.length, 3);
+
+    const renamed = await rpc("update_secret_name", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_name: "山山队长",
+    });
+    assert.equal(renamed.self.name, "山山队长");
+    await expectRpcError("update_secret_name", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_name: "1234567890123",
+    }, "INVALID_NAME");
 
     const started = await rpc("start_secret_room", { p_room_code: code, p_device_token: ownerToken });
     assert.equal(started.status, "playing");
-    const witness = started.players.find((player) => player.name === "阿禾");
-    const third = started.players.find((player) => player.name === "小满");
+    const witness = started.players.find((player) => player.name === "Mars-7");
+    const third = started.players.find((player) => player.name === "小王同学");
 
     const presence = await rpc("set_secret_presence", {
       p_room_code: code,
@@ -55,7 +67,7 @@ async function run() {
       p_task_code: "M01-TST",
       p_task_id: "M01",
       p_points: 2,
-      p_target_name: "2号 · 阿禾",
+      p_target_name: "2号 · Mars-7",
       p_witness_id: witness.id,
       p_played_on: new Date().toISOString().slice(0, 10),
     });
@@ -84,7 +96,7 @@ async function run() {
       p_task_code: "L01-TST",
       p_task_id: "L01",
       p_points: 1,
-      p_target_name: "2号 · 阿禾",
+      p_target_name: "2号 · Mars-7",
       p_witness_id: witness.id,
       p_played_on: new Date().toISOString().slice(0, 10),
     });
@@ -102,7 +114,7 @@ async function run() {
       p_task_code: "H03-TST",
       p_task_id: "H03",
       p_points: 3,
-      p_target_name: "3号 · 小满",
+      p_target_name: "3号 · 小王同学",
       p_witness_id: witness.id,
       p_played_on: new Date().toISOString().slice(0, 10),
     }, "DAILY_LIMIT");
@@ -140,7 +152,7 @@ async function run() {
     assert.equal(ended.status, "ended");
     deleted = await rpc("delete_secret_room", { p_room_code: code, p_device_token: ownerToken });
     assert.equal(deleted, true);
-    console.log(JSON.stringify({ roomCode: code, players: 3, ownerScore: 3, witnessScore: 1, dailyLimitEnforced: true, deleted }));
+    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, ownerScore: 3, witnessScore: 1, dailyLimitEnforced: true, deleted }));
   } finally {
     if (!deleted) console.error(`Smoke room ${code} requires manual cleanup.`);
   }

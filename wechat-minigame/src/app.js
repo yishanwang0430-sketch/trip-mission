@@ -14,8 +14,14 @@ const RECORD_STATUS = {
   expired: "已超时",
 };
 
-const TRAVEL_NAMES = ["一山", "阿禾", "小满", "青川", "南星", "木木", "可乐", "石榴", "松风", "朝露", "云舟", "听雨"];
 const REVIEW_PRESETS = ["最好笑的一次", "最巧妙的一次", "最默契的一次", "最意外的一次", "今天很顺利", "期待明天继续"];
+
+function normalizePlayerName(value) {
+  const name = String(value || "").trim();
+  if (Array.from(name).length < 1 || Array.from(name).length > 12) return null;
+  if (/[\u0000-\u001f\u007f]/.test(name)) return null;
+  return name;
+}
 
 function formatReviewDate(key) {
   if (!key) return "今日复盘";
@@ -261,19 +267,21 @@ class TravelSecretGame {
     wx.shareAppMessage?.(this.sharePayload());
   }
 
+  async requestPlayerName() {
+    const entered = await promptText("设置玩家昵称", "输入 1–12 个字符", this.local.profileName);
+    if (entered === null) return null;
+    const name = normalizePlayerName(entered);
+    if (!name) this.showToast("请输入 1–12 个字符的昵称");
+    return name;
+  }
+
   async createRoom() {
-    this.overlayPicker = {
-      type: "profile",
-      title: "选择旅行代号",
-      options: TRAVEL_NAMES.map((name) => ({ label: name, value: name })),
-      help: "座位号会自动分配，代号可以重复",
-      nextAction: "create",
-    };
-    this.render();
+    const name = await this.requestPlayerName();
+    if (!name) return;
+    await this.finishCreateRoom(name);
   }
 
   async finishCreateRoom(name) {
-    this.overlayPicker = null;
     await this.runBusy(async () => {
       const room = await api.createRoom(name, this.token, this.local.desiredCapacity);
       this.setRoom(room, "lobby");
@@ -287,19 +295,13 @@ class TravelSecretGame {
     const code = entered.replace(/\D/g, "").slice(0, 6);
     if (code.length !== 6) return this.showToast("请输入 6 位房间号");
     this.pendingJoinCode = code;
-    this.overlayPicker = {
-      type: "profile",
-      title: "选择旅行代号",
-      options: TRAVEL_NAMES.map((name) => ({ label: name, value: name })),
-      help: "座位号会自动分配，代号可以重复",
-      nextAction: "join",
-    };
-    this.render();
+    const name = await this.requestPlayerName();
+    if (!name) return;
+    await this.finishJoinRoom(name);
   }
 
   async finishJoinRoom(name) {
     const code = this.pendingJoinCode;
-    this.overlayPicker = null;
     await this.runBusy(async () => {
       const room = await api.joinRoom(code, name, this.token);
       this.setRoom(room);
@@ -468,16 +470,27 @@ class TravelSecretGame {
   async roomMenu() {
     const self = this.room.players.find((player) => player.id === this.room.self.id);
     const presenceLabel = self?.present === false ? "重新归队" : "暂离本轮";
-    const items = ["复制房间号", "分享给同行", presenceLabel, "规则与安全边界", "退出本机"];
+    const items = ["修改昵称", "复制房间号", "分享给同行", presenceLabel, "规则与安全边界", "退出本机"];
     wx.showActionSheet({
       itemList: items,
       success: ({ tapIndex }) => {
-        if (tapIndex === 0) wx.setClipboardData?.({ data: this.room.roomCode });
-        else if (tapIndex === 1) this.shareRoom();
-        else if (tapIndex === 2) this.togglePresence(self?.present === false);
-        else if (tapIndex === 3) this.showRules();
-        else if (tapIndex === 4) this.leaveLocal();
+        if (tapIndex === 0) this.editName();
+        else if (tapIndex === 1) wx.setClipboardData?.({ data: this.room.roomCode });
+        else if (tapIndex === 2) this.shareRoom();
+        else if (tapIndex === 3) this.togglePresence(self?.present === false);
+        else if (tapIndex === 4) this.showRules();
+        else if (tapIndex === 5) this.leaveLocal();
       },
+    });
+  }
+
+  async editName() {
+    const name = await this.requestPlayerName();
+    if (!name || name === this.room?.self?.name) return;
+    await this.runBusy(async () => {
+      const room = await api.updateName(this.room.roomCode, this.token, name);
+      this.setRoom(room);
+      this.showToast("昵称已更新");
     });
   }
 
@@ -563,12 +576,10 @@ class TravelSecretGame {
         if (this.overlayPicker?.type === "witness") this.completeTask(payload);
         else if (this.overlayPicker?.type === "award") this.awardReview(payload);
         else if (this.overlayPicker?.type === "review") this.saveReviewPreset(payload);
-        else if (this.overlayPicker?.type === "profile" && this.overlayPicker.nextAction === "create") this.finishCreateRoom(payload);
-        else if (this.overlayPicker?.type === "profile" && this.overlayPicker.nextAction === "join") this.finishJoinRoom(payload);
       },
     };
     return actions[action]?.();
   }
 }
 
-module.exports = { TravelSecretGame, RECORD_STATUS, REVIEW_PRESETS, TRAVEL_NAMES, formatReviewDate, timeLeft };
+module.exports = { TravelSecretGame, RECORD_STATUS, REVIEW_PRESETS, normalizePlayerName, formatReviewDate, timeLeft };

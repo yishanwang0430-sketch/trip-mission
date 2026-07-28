@@ -93,9 +93,15 @@
     vibrateShort() {},
     request(options) {
       const name = rpcName(options.url);
-      if (name === "create_secret_room" || name === "join_secret_room" || name === "get_secret_room") respond(options, room);
+      if (name === "create_secret_room" || name === "join_secret_room") {
+        room.self.name = options.data.p_name;
+        room.players[0].name = options.data.p_name;
+        respond(options, room);
+      }
+      else if (name === "get_secret_room") respond(options, room);
       else if (name === "start_secret_room") { room.status = "playing"; respond(options, room); }
       else if (name === "set_secret_presence") { room.players[0].present = options.data.p_present; respond(options, room); }
+      else if (name === "update_secret_name") { room.self.name = options.data.p_name; room.players[0].name = options.data.p_name; respond(options, room); }
       else if (name === "set_secret_room_status") { room.status = options.data.p_status; room.currentReviewOn = options.data.p_reviewed_on || room.currentReviewOn; respond(options, room); }
       else if (name === "claim_secret_score") { room.myClaims.push({ taskUid: options.data.p_task_uid, status: "pending" }); respond(options, room); }
       else if (name === "resolve_secret_score") { room.pendingApprovals = room.pendingApprovals.filter((item) => item.id !== options.data.p_claim_id); respond(options, room); }

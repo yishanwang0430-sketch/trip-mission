@@ -5,7 +5,7 @@ const ERROR_MESSAGES = {
   ROOM_FULL: "房间已经满员",
   ROOM_STARTED: "房间已经开局，不能再加入",
   INVALID_MEMBER: "本机房间凭证已失效",
-  INVALID_NAME: "请选择有效的旅行代号",
+  INVALID_NAME: "请输入 1–12 个字符的昵称",
   INVALID_REVIEW: "请选择有效的复盘印象",
   INVALID_CAPACITY: "人数需设置为 3–12 人",
   NOT_ENOUGH_PLAYERS: "至少 3 人到齐才能开局",
@@ -68,6 +68,9 @@ module.exports = {
   },
   setPresence(code, token, present) {
     return rpc("set_secret_presence", { p_room_code: code, p_device_token: token, p_present: present });
+  },
+  updateName(code, token, name) {
+    return rpc("update_secret_name", { p_room_code: code, p_device_token: token, p_name: name });
   },
   setRoomStatus(code, token, status, reviewedOn = null) {
     return rpc("set_secret_room_status", {

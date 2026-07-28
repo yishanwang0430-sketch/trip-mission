@@ -246,7 +246,8 @@ declare
   v_player public.secret_players;
   v_attempt integer := 0;
 begin
-  if trim(p_name) <> all(array['一山','阿禾','小满','青川','南星','木木','可乐','石榴','松风','朝露','云舟','听雨']) then
+  if char_length(trim(coalesce(p_name, ''))) not between 1 and 12
+    or trim(p_name) ~ '[[:cntrl:]]' then
     raise exception 'INVALID_NAME';
   end if;
   if p_max_players not between 3 and 12 then raise exception 'INVALID_CAPACITY'; end if;
@@ -287,7 +288,8 @@ declare
   v_existing public.secret_players;
   v_seat integer;
 begin
-  if trim(p_name) <> all(array['一山','阿禾','小满','青川','南星','木木','可乐','石榴','松风','朝露','云舟','听雨']) then
+  if char_length(trim(coalesce(p_name, ''))) not between 1 and 12
+    or trim(p_name) ~ '[[:cntrl:]]' then
     raise exception 'INVALID_NAME';
   end if;
 
@@ -326,6 +328,39 @@ begin
   insert into public.secret_players(room_id, device_token_hash, seat, name)
   values (v_room.id, public.secret_token_hash(p_device_token), v_seat, trim(p_name));
   return public.secret_room_payload(v_room.id, p_device_token);
+end;
+$$;
+
+create or replace function public.update_secret_name(
+  p_room_code text,
+  p_device_token uuid,
+  p_name text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_room_id uuid;
+begin
+  if char_length(trim(coalesce(p_name, ''))) not between 1 and 12
+    or trim(p_name) ~ '[[:cntrl:]]' then
+    raise exception 'INVALID_NAME';
+  end if;
+
+  select id into v_room_id
+  from public.secret_rooms
+  where code = trim(p_room_code) and status <> 'ended';
+  if not found then raise exception 'ROOM_NOT_FOUND'; end if;
+
+  update public.secret_players
+  set name = trim(p_name), last_seen_at = now()
+  where room_id = v_room_id
+    and device_token_hash = public.secret_token_hash(p_device_token);
+  if not found then raise exception 'INVALID_MEMBER'; end if;
+
+  return public.secret_room_payload(v_room_id, p_device_token);
 end;
 $$;
 
@@ -654,6 +689,7 @@ revoke all on function public.join_secret_room(text, text, uuid) from public, au
 revoke all on function public.get_secret_room(text, uuid) from public, authenticated;
 revoke all on function public.start_secret_room(text, uuid) from public, authenticated;
 revoke all on function public.set_secret_presence(text, uuid, boolean) from public, authenticated;
+revoke all on function public.update_secret_name(text, uuid, text) from public, authenticated;
 revoke all on function public.set_secret_room_status(text, uuid, text, date) from public, authenticated;
 revoke all on function public.claim_secret_score(text, uuid, text, text, text, integer, text, uuid, date) from public, authenticated;
 revoke all on function public.resolve_secret_score(text, uuid, uuid, boolean) from public, authenticated;
@@ -666,6 +702,7 @@ grant execute on function public.join_secret_room(text, text, uuid) to anon;
 grant execute on function public.get_secret_room(text, uuid) to anon;
 grant execute on function public.start_secret_room(text, uuid) to anon;
 grant execute on function public.set_secret_presence(text, uuid, boolean) to anon;
+grant execute on function public.update_secret_name(text, uuid, text) to anon;
 grant execute on function public.set_secret_room_status(text, uuid, text, date) to anon;
 grant execute on function public.claim_secret_score(text, uuid, text, text, text, integer, text, uuid, date) to anon;
 grant execute on function public.resolve_secret_score(text, uuid, uuid, boolean) to anon;
