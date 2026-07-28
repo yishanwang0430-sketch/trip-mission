@@ -1244,13 +1244,14 @@ class GameRenderer {
 
   drawHeader(model, title = "游侠密令") {
     const ctx = this.ctx;
+    const brandedTitle = title === "游侠密令" ? title : `游侠密令 · ${title}`;
     ctx.fillStyle = "rgba(255,253,247,0.97)";
     ctx.fillRect(0, 0, this.width, this.headerHeight);
     ctx.strokeStyle = COLORS.line;
     ctx.beginPath(); ctx.moveTo(0, this.headerHeight - 0.5); ctx.lineTo(this.width, this.headerHeight - 0.5); ctx.stroke();
     this.hit("noop", 0, 0, this.width, this.headerHeight);
     this.drawLogo(16, this.safeTop + 10, 40);
-    this.text(title, 66, this.safeTop + 24, 17, COLORS.ink, "left", "700");
+    this.text(brandedTitle, 66, this.safeTop + 24, 17, COLORS.ink, "left", "700");
     if (model.room) {
       const online = model.room.players.filter((player) => player.online).length;
       this.text(`${model.room.roomCode} · ${online}在线`, 66, this.safeTop + 44, 11, COLORS.muted, "left", "400");
