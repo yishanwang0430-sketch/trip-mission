@@ -23,6 +23,9 @@
 - `screenshots/04-secret-task.jpg`：私密任务板、限时和见证入口。
 - `screenshots/05-daily-review.jpg`：每日复盘及今日最佳。
 - `screenshots/06-final-ranking.jpg`：旅程结束后的最终排行榜。
+- `screenshots/07-concealed-task.jpg`：密令遮挡状态，防止同行看到私密任务。
+- `screenshots/08-witness-picker.jpg`：完成任务后选择同行见证人。
+- `screenshots/09-live-ranking.jpg`：旅程进行中的实时总榜及成员状态。
 
 ## 3. 系统功能
 
@@ -78,4 +81,4 @@
 
 - 上传版均为高质量 JPG，尺寸为 860×1864，单张文件大小控制在 60KB–5MB。
 - 截图顶部或首页正文包含当前小游戏名称“游侠密令”。
-- 当前文件由与小游戏 Canvas 相同的浏览器预览生成。审核后台若严格要求微信运行环境截图，请在微信开发者工具导入项目后，按相同六个页面重新截图并替换文件。
+- 当前文件由与小游戏 Canvas 相同的浏览器预览生成。审核后台若严格要求微信运行环境截图，请在微信开发者工具导入项目后，按相同九个页面重新截图并替换文件。
