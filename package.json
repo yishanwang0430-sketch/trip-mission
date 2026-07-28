@@ -1,0 +1,8 @@
+{
+  "name": "trip-mission",
+  "private": true,
+  "scripts": {
+    "build:minigame-preview": "node wechat-minigame/scripts/build-preview.mjs",
+    "test": "node --test tests/*.test.js wechat-minigame/tests/*.test.js"
+  }
+}

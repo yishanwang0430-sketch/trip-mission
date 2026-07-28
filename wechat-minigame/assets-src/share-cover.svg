@@ -1,0 +1,14 @@
+<svg width="600" height="480" viewBox="0 0 600 480" xmlns="http://www.w3.org/2000/svg">
+  <rect width="600" height="480" fill="#edf1ed"/>
+  <path d="M-30 115C85 25 180 167 286 90C370 28 432 36 638 138" fill="none" stroke="#39735b" stroke-opacity="0.22" stroke-width="9" stroke-linecap="round" stroke-dasharray="13 17"/>
+  <circle cx="58" cy="91" r="18" fill="#b64b43" stroke="#fffdf7" stroke-width="8"/>
+  <circle cx="545" cy="112" r="18" fill="#39735b" stroke="#fffdf7" stroke-width="8"/>
+  <rect x="63" y="151" width="474" height="245" rx="10" fill="#62452f"/>
+  <rect x="74" y="162" width="452" height="223" rx="8" fill="#8b6240"/>
+  <path d="M92 194C192 171 292 213 508 183M92 238C220 209 354 264 508 224M92 283C220 251 354 305 508 269M92 331C210 297 380 350 508 315" fill="none" stroke="#5a3c29" stroke-opacity="0.35" stroke-width="3"/>
+  <rect x="112" y="190" width="376" height="166" rx="5" fill="#f7f0df" stroke="#d8c8a5" stroke-width="3"/>
+  <circle cx="300" cy="241" r="40" fill="none" stroke="#b64b43" stroke-width="6"/>
+  <text x="300" y="259" text-anchor="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="54" font-weight="700" fill="#b64b43">令</text>
+  <text x="300" y="321" text-anchor="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="38" font-weight="700" fill="#243238">旅游密令</text>
+  <text x="300" y="433" text-anchor="middle" font-family="PingFang SC, Microsoft YaHei, sans-serif" font-size="22" font-weight="500" fill="#5f6c69">旅行中的隐秘任务</text>
+</svg>

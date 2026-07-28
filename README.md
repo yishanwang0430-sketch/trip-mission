@@ -2,9 +2,15 @@
 
 一个面向 8 人旅行的随机任务网页应用。密令仅保存在本人手机；加入同一个 6 位数字房间后，在线状态、得分、出勤和每日复盘会实时同步。无网络时仍可使用本机模式。
 
+仓库同时包含一套独立的微信小游戏版本“旅游密令”，位于 [`wechat-minigame/`](wechat-minigame/)。原网页文件和二维码保持不变。
+
 ## 在线地址
 
 https://yishanwang0430-sketch.github.io/trip-mission/
+
+微信小游戏界面预览：
+
+https://yishanwang0430-sketch.github.io/trip-mission/wechat-minigame/preview/?demo=task
 
 ## 简化规则
 
