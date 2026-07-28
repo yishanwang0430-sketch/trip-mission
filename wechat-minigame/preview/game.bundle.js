@@ -260,7 +260,7 @@ class TravelSecretGame {
   sharePayload() {
     const code = this.room?.roomCode || this.inviteCode;
     return {
-      title: code ? `加入我的旅游密令房：${code}` : "旅游密令 · 旅行中的隐秘任务",
+      title: code ? `加入我的游侠密令房：${code}` : "游侠密令 · 旅行中的隐秘任务",
       query: code ? `room=${code}` : "",
       imageUrl: "assets/share-cover.png",
     };
@@ -516,7 +516,7 @@ class TravelSecretGame {
 
   showRules() {
     wx.showModal({
-      title: "旅游密令规则",
+      title: "游侠密令规则",
       content: "每天可抽 2 次密令，每次限时 2 小时。完成后指定一名同行见证，确认后按难度获得 1–3 分。不要执行危险、冒犯、违法或影响陌生人的任务；任何人不舒服都应立即停止。每日可复盘一次，房主评选最佳妙计 +1 分。",
       showCancel: false,
       confirmText: "明白",
@@ -600,6 +600,10 @@ const ERROR_MESSAGES = {
   WITNESS_ONLY: "只有指定见证人可以确认",
   INVALID_ROOM_STATUS: "当前房间阶段不能执行此操作",
   INVALID_WITNESS: "请选择另一名在场玩家见证",
+  INVALID_TASK: "密令编号与分值不一致",
+  INVALID_PLAY_DATE: "任务日期无效",
+  DAILY_LIMIT: "今天已经提交过 2 次计分",
+  PENDING_CLAIMS: "还有待见证任务，确认后才能结束旅程",
 };
 
 function friendlyError(payload, fallback = "联机操作失败") {
@@ -695,7 +699,7 @@ module.exports = {
 },
 3: function(module, exports, __require) {
 module.exports = {
-  appName: "旅游密令",
+  appName: "游侠密令",
   supabaseUrl: "https://pdahxhpgxmsqntoozsgo.supabase.co",
   supabaseAnonKey: "sb_publishable_ApR8zOwmhO1329Zk4lUBSw_g-DnN-Fy",
   pollIntervalMs: 5000,
@@ -1205,7 +1209,7 @@ class GameRenderer {
     }
 
     this.drawLogo(center - 40, this.safeTop + 52, 80);
-    this.text("旅游密令", center, this.safeTop + 156, 30, COLORS.ink, "center", "700");
+    this.text("游侠密令", center, this.safeTop + 156, 30, COLORS.ink, "center", "700");
     this.text("旅行中的隐秘任务", center, this.safeTop + 188, 14, COLORS.muted, "center", "400");
 
     const panelY = this.safeTop + 230;
@@ -1224,7 +1228,7 @@ class GameRenderer {
     this.text("v1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
-  drawHeader(model, title = "旅游密令") {
+  drawHeader(model, title = "游侠密令") {
     const ctx = this.ctx;
     ctx.fillStyle = "rgba(255,253,247,0.97)";
     ctx.fillRect(0, 0, this.width, this.headerHeight);

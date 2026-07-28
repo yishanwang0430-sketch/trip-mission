@@ -323,7 +323,7 @@ class GameRenderer {
     }
 
     this.drawLogo(center - 40, this.safeTop + 52, 80);
-    this.text("旅游密令", center, this.safeTop + 156, 30, COLORS.ink, "center", "700");
+    this.text("游侠密令", center, this.safeTop + 156, 30, COLORS.ink, "center", "700");
     this.text("旅行中的隐秘任务", center, this.safeTop + 188, 14, COLORS.muted, "center", "400");
 
     const panelY = this.safeTop + 230;
@@ -342,7 +342,7 @@ class GameRenderer {
     this.text("v1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
-  drawHeader(model, title = "旅游密令") {
+  drawHeader(model, title = "游侠密令") {
     const ctx = this.ctx;
     ctx.fillStyle = "rgba(255,253,247,0.97)";
     ctx.fillRect(0, 0, this.width, this.headerHeight);

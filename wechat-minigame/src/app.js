@@ -250,7 +250,7 @@ class TravelSecretGame {
   sharePayload() {
     const code = this.room?.roomCode || this.inviteCode;
     return {
-      title: code ? `加入我的旅游密令房：${code}` : "旅游密令 · 旅行中的隐秘任务",
+      title: code ? `加入我的游侠密令房：${code}` : "游侠密令 · 旅行中的隐秘任务",
       query: code ? `room=${code}` : "",
       imageUrl: "assets/share-cover.png",
     };
@@ -506,7 +506,7 @@ class TravelSecretGame {
 
   showRules() {
     wx.showModal({
-      title: "旅游密令规则",
+      title: "游侠密令规则",
       content: "每天可抽 2 次密令，每次限时 2 小时。完成后指定一名同行见证，确认后按难度获得 1–3 分。不要执行危险、冒犯、违法或影响陌生人的任务；任何人不舒服都应立即停止。每日可复盘一次，房主评选最佳妙计 +1 分。",
       showCancel: false,
       confirmText: "明白",

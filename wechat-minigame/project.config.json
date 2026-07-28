@@ -3,7 +3,7 @@
   "compileType": "game",
   "libVersion": "3.7.12",
   "miniprogramRoot": "./",
-  "projectname": "旅游密令-微信小游戏",
+  "projectname": "游侠密令-微信小游戏",
   "setting": {
     "es6": true,
     "enhance": true,
