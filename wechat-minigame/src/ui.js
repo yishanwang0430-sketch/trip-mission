@@ -287,7 +287,10 @@ class GameRenderer {
       ctx.moveTo(-7, 0); ctx.lineTo(7, 0); ctx.stroke();
     } else if (name === "seal") {
       ctx.arc(0, 0, 8, 0, Math.PI * 2); ctx.stroke();
-      ctx.font = "600 10px sans-serif"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText("令", 0, 0.5);
+      ctx.beginPath();
+      ctx.moveTo(0, -5.5); ctx.lineTo(3.5, 0); ctx.lineTo(0, -1); ctx.lineTo(-3.5, 0); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(0, 5.5); ctx.lineTo(3.5, 0); ctx.lineTo(0, 1); ctx.lineTo(-3.5, 0); ctx.closePath(); ctx.stroke();
     } else if (name === "back") {
       ctx.moveTo(6, -8); ctx.lineTo(-3, 0); ctx.lineTo(6, 8); ctx.stroke();
     } else if (name === "more") {
@@ -301,7 +304,7 @@ class GameRenderer {
       this.ctx.drawImage(this.logo, x, y, size, size);
     } else {
       this.panel(x, y, size, size, COLORS.ink, null, 8);
-      this.text("令", x + size / 2, y + size / 2, Math.round(size * 0.5), COLORS.red, "center", "700");
+      this.icon("seal", x + size / 2, y + size / 2, COLORS.red, Math.round(size * 0.56));
     }
   }
 
