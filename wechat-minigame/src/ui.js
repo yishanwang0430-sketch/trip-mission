@@ -346,7 +346,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.2.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.2.2 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -362,10 +362,6 @@ class GameRenderer {
     if (model.room) {
       const online = model.room.players.filter((player) => player.online).length;
       this.text(`${model.room.roomCode} · ${online}在线`, 66, this.safeTop + 44, 11, COLORS.muted, "left", "400");
-      this.text("退出", this.width - 78, this.safeTop + 31, 12, COLORS.redDark, "center", "600");
-      this.hit("leave_local", this.width - 104, this.safeTop + 6, 48, 48);
-      this.icon("more", this.width - 30, this.safeTop + 30, COLORS.ink, 20);
-      this.hit("room_menu", this.width - 54, this.safeTop + 6, 48, 48);
     }
   }
 
@@ -375,6 +371,10 @@ class GameRenderer {
     const contentTop = this.headerHeight + 18;
     this.text("房间号", 20, contentTop + 10, 12, COLORS.muted, "left", "500");
     this.text(room.roomCode, 20, contentTop + 44, 32, COLORS.ink, "left", "700");
+    this.icon("back", 28, contentTop + 76, COLORS.redDark, 14);
+    this.text("退出房间", 42, contentTop + 76, 12, COLORS.redDark, "left", "600");
+    this.hit("leave_local", 16, contentTop + 58, 92, 36);
+    this.button({ x: this.width - 184, y: contentTop + 18, width: 44, height: 44, label: "", action: "room_menu", kind: "secondary", icon: "more" });
     this.button({ x: this.width - 132, y: contentTop + 18, width: 112, height: 44, label: "邀请同行", action: "share_room", kind: "secondary", icon: "share" });
 
     const routeY = contentTop + 94;
@@ -604,6 +604,7 @@ class GameRenderer {
       ["missions", "密令", "dice"],
       ["ranking", "总榜", "rank"],
       ["review", model.room.status === "review" ? "复盘中" : "复盘", "review"],
+      ["room_menu", "房间", "more"],
     ];
     const width = this.width / items.length;
     items.forEach(([screen, label, icon], index) => {
@@ -615,7 +616,7 @@ class GameRenderer {
         this.ctx.beginPath(); this.ctx.arc(center + 15, y + 13, 8, 0, Math.PI * 2); this.ctx.fillStyle = COLORS.red; this.ctx.fill();
         this.text(model.room.pendingApprovals.length, center + 15, y + 13, 9, COLORS.white, "center", "700");
       }
-      this.hit("navigate", width * index, y, width, 64, screen);
+      this.hit(screen === "room_menu" ? "room_menu" : "navigate", width * index, y, width, 64, screen === "room_menu" ? null : screen);
     });
   }
 
@@ -652,18 +653,17 @@ class GameRenderer {
       this.text("结束整段旅程", this.width / 2, y + 26, 12, COLORS.redDark, "center", "500");
       y += 54;
     }
+    if (model.room.self.isOwner && model.room.status === "ended") {
+      this.hit("delete_room", this.width / 2 - 86, y + 6, 172, 40);
+      this.text("永久删除房间数据", this.width / 2, y + 26, 12, COLORS.redDark, "center", "600");
+      y += 54;
+    }
     this.maxScroll = Math.max(0, y - offset - (this.height - this.navHeight - 12));
     if (model.room.status !== "ended") this.drawNav(model);
     else {
       this.button({ x: 20, y: this.height - this.safeBottom - 62, width: this.width - 40, height: 50, label: "返回首页", action: "leave_local", kind: "dark", icon: "back" });
     }
     this.drawHeader(model, model.room.status === "ended" ? "旅程终榜" : "同行总榜");
-    if (model.room.status === "ended") {
-      if (model.room.self.isOwner) {
-        this.hit("delete_room", this.width - 122, this.safeTop + 7, 68, 48);
-        this.text("删数据", this.width - 64, this.safeTop + 31, 10, COLORS.redDark, "right", "600");
-      }
-    }
   }
 
   drawReview(model) {
