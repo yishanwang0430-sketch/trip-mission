@@ -15,7 +15,7 @@ const ERROR_MESSAGES = {
   INVALID_WITNESS: "请选择另一名在场玩家见证",
   INVALID_TASK: "密令编号与分值不一致",
   INVALID_PLAY_DATE: "任务日期无效",
-  DAILY_LIMIT: "今天已经提交过 2 次计分",
+  DAILY_LIMIT: "最近6小时内已提交3次计分，请稍后再试",
   PENDING_CLAIMS: "还有待见证任务，确认后才能结束旅程",
   HIDDEN_TASK_EDITOR_ONLY: "只有本轮抽中的设计者可以编辑隐藏任务",
   HIDDEN_TASK_LOCKED: "隐藏任务已经提交，不能再次修改",

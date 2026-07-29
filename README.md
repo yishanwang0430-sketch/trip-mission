@@ -14,7 +14,7 @@ https://yishanwang0430-sketch.github.io/trip-mission/wechat-minigame/preview/?de
 
 ## 简化规则
 
-1. 每人每天默认最多抽 2 个任务。
+1. 每人最多保留 3 个任务抽取额度，每次使用后 6 小时恢复。
 2. 任务抽出后只能完成或放弃，2 小时后自动超时。
 3. 任务按难度固定为 1、2、3 分。
 4. 完成后说“计成”，由一名在场玩家确认。

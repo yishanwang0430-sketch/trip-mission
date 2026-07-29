@@ -691,8 +691,10 @@ begin
   end if;
   if (
     select count(*) from public.secret_score_claims
-    where room_id = v_room.id and player_id = v_player.id and played_on = p_played_on
-  ) >= 2 then raise exception 'DAILY_LIMIT'; end if;
+    where room_id = v_room.id
+      and player_id = v_player.id
+      and created_at > now() - interval '6 hours'
+  ) >= 3 then raise exception 'DAILY_LIMIT'; end if;
   if not exists (
     select 1 from public.secret_players
     where id = p_witness_id and room_id = v_room.id and id <> v_player.id

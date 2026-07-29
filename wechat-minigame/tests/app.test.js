@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildHiddenMission, normalizePlayerName, validateHiddenTask } = require("../src/app");
+const { buildHiddenMission, drawAvailability, normalizePlayerName, validateHiddenTask } = require("../src/app");
 
 test("player names are custom, trimmed and limited to 12 characters", () => {
   assert.equal(normalizePlayerName("  小王  "), "小王");
@@ -31,4 +31,33 @@ test("server hidden task becomes a local locked mission", () => {
   assert.equal(mission.score, 3);
   assert.equal(mission.revealed, false);
   assert.equal(mission.expiresAt - mission.drawnAt, 2 * 60 * 60 * 1000);
+});
+
+test("draw quota keeps three slots and restores each slot after six hours", () => {
+  const now = 1785300000000;
+  const sixHours = 6 * 60 * 60 * 1000;
+  const state = drawAvailability({
+    now,
+    history: [
+      { uid: "expired", drawnAt: now - sixHours - 1 },
+      { uid: "first", drawnAt: now - 5 * 60 * 60 * 1000 },
+      { uid: "second", drawnAt: now - 2 * 60 * 60 * 1000 },
+    ],
+    activeTask: { uid: "active", drawnAt: now - 60 * 60 * 1000 },
+  });
+
+  assert.equal(state.used, 3);
+  assert.equal(state.remaining, 0);
+  assert.equal(state.nextRefreshAt, now + 60 * 60 * 1000);
+
+  const restored = drawAvailability({
+    now: now + 60 * 60 * 1000,
+    history: [
+      { uid: "first", drawnAt: now - 5 * 60 * 60 * 1000 },
+      { uid: "second", drawnAt: now - 2 * 60 * 60 * 1000 },
+      { uid: "active", drawnAt: now - 60 * 60 * 1000 },
+    ],
+  });
+  assert.equal(restored.used, 2);
+  assert.equal(restored.remaining, 1);
 });

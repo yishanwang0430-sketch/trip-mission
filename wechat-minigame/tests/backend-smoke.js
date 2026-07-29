@@ -146,12 +146,30 @@ async function run() {
       p_claim_id: secondWitnessView.pendingApprovals[0].id,
       p_approved: true,
     });
-    await expectRpcError("claim_secret_score", {
+    await rpc("claim_secret_score", {
       p_room_code: code,
       p_device_token: ownerToken,
       p_task_uid: `smoke-${randomUUID()}`,
       p_task_code: "H03-TST",
       p_task_id: "H03",
+      p_points: 3,
+      p_target_name: "3号 · 小王同学",
+      p_witness_id: witness.id,
+      p_played_on: new Date().toISOString().slice(0, 10),
+    });
+    const thirdWitnessView = await rpc("get_secret_room", { p_room_code: code, p_device_token: witnessToken });
+    await rpc("resolve_secret_score", {
+      p_room_code: code,
+      p_device_token: witnessToken,
+      p_claim_id: thirdWitnessView.pendingApprovals[0].id,
+      p_approved: true,
+    });
+    await expectRpcError("claim_secret_score", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_task_uid: `smoke-${randomUUID()}`,
+      p_task_code: "H04-TST",
+      p_task_id: "H04",
       p_points: 3,
       p_target_name: "3号 · 小王同学",
       p_witness_id: witness.id,
@@ -173,7 +191,7 @@ async function run() {
       p_device_token: ownerToken,
       p_player_id: witness.id,
     });
-    assert.equal(awarded.players.find((player) => player.id === awarded.self.id).totalScore, 3);
+    assert.equal(awarded.players.find((player) => player.id === awarded.self.id).totalScore, 6);
     assert.equal(awarded.players.find((player) => player.id === witness.id).totalScore, 1);
 
     await rpc("set_secret_room_status", {
@@ -191,7 +209,7 @@ async function run() {
     assert.equal(ended.status, "ended");
     deleted = await rpc("delete_secret_room", { p_room_code: code, p_device_token: ownerToken });
     assert.equal(deleted, true);
-    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, hiddenTaskAssigned: true, ownerScore: 3, witnessScore: 1, dailyLimitEnforced: true, deleted }));
+    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, hiddenTaskAssigned: true, ownerScore: 6, witnessScore: 1, rollingSixHourLimitEnforced: true, deleted }));
   } finally {
     if (!deleted) console.error(`Smoke room ${code} requires manual cleanup.`);
   }

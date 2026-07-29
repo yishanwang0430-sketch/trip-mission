@@ -64,10 +64,34 @@ function formatReviewDate(key) {
 }
 
 function timeLeft(timestamp) {
-  const remaining = Math.max(0, timestamp - Date.now());
+  return timeUntil(timestamp, Date.now());
+}
+
+function timeUntil(timestamp, now = Date.now()) {
+  const remaining = Math.max(0, timestamp - now);
   const totalMinutes = Math.ceil(remaining / 60000);
   if (totalMinutes >= 60) return `${Math.floor(totalMinutes / 60)}小时${totalMinutes % 60}分`;
   return `${totalMinutes}分钟`;
+}
+
+function drawAvailability({ history = [], activeTask = null, now = Date.now(), limit = config.drawLimit, refreshMs = config.drawRefreshMs } = {}) {
+  const records = [...history, activeTask].filter(Boolean);
+  const seen = new Set();
+  const recentDraws = records
+    .map((record) => ({ uid: record.uid, drawnAt: Number(record.drawnAt) }))
+    .filter(({ uid, drawnAt }) => {
+      if (!Number.isFinite(drawnAt) || drawnAt > now || drawnAt <= now - refreshMs || (uid && seen.has(uid))) return false;
+      if (uid) seen.add(uid);
+      return true;
+    })
+    .map(({ drawnAt }) => drawnAt)
+    .sort((a, b) => a - b);
+  const remaining = Math.max(0, limit - recentDraws.length);
+  return {
+    used: recentDraws.length,
+    remaining,
+    nextRefreshAt: remaining === 0 ? recentDraws[0] + refreshMs : null,
+  };
 }
 
 function promptText(title, placeholder, initial = "") {
@@ -134,8 +158,7 @@ class TravelSecretGame {
 
   model() {
     const today = dateKey();
-    const drawnToday = this.local.history.filter((record) => record.playedOn === today).length
-      + (this.local.activeTask?.playedOn === today ? 1 : 0);
+    const drawState = drawAvailability({ history: this.local.history, activeTask: this.local.activeTask });
     const todayApprovedScore = this.local.history
       .filter((record) => record.playedOn === today && record.status === "approved")
       .reduce((sum, record) => sum + record.score, 0);
@@ -157,7 +180,8 @@ class TravelSecretGame {
       activeTask: this.local.activeTask,
       history: [...this.local.history].reverse(),
       ranking,
-      remainingDraws: Math.max(0, config.dailyDrawLimit - drawnToday),
+      remainingDraws: drawState.remaining,
+      drawRefreshLabel: drawState.nextRefreshAt ? `约 ${timeLeft(drawState.nextRefreshAt)} 后恢复` : "每次使用后 6 小时恢复",
       todayApprovedScore,
       taskTimeLeft: this.local.activeTask ? timeLeft(this.local.activeTask.expiresAt) : "",
       reviewDateLabel: formatReviewDate(room.currentReviewOn),
@@ -402,7 +426,7 @@ class TravelSecretGame {
     if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
     if (this.local.activeTask) return this.showToast("请先完成当前密令");
     const model = this.model();
-    if (model.remainingDraws <= 0) return this.showToast("今日抽取次数已用完");
+    if (model.remainingDraws <= 0) return this.showToast(`抽取额度已用完，${model.drawRefreshLabel}`);
     try {
       const presentPlayers = this.room.players.filter((player) => player.present !== false);
       if (!presentPlayers.some((player) => player.id === this.room.self.id)) {
@@ -566,7 +590,7 @@ class TravelSecretGame {
   async roomMenu() {
     const self = this.room.players.find((player) => player.id === this.room.self.id);
     const presenceLabel = self?.present === false ? "重新归队" : "暂离本轮";
-    const items = ["修改昵称", "复制房间号", "分享给同行", presenceLabel, "规则与安全边界", "退出本机"];
+    const items = ["修改昵称", "复制房间号", "分享给同行", presenceLabel, "规则与安全边界", "退出房间"];
     wx.showActionSheet({
       itemList: items,
       success: ({ tapIndex }) => {
@@ -616,7 +640,7 @@ class TravelSecretGame {
   showRules() {
     wx.showModal({
       title: "游侠密令规则",
-      content: "每天可抽 2 次密令，每次限时 2 小时。每个新房间会随机选出一名隐藏任务设计者，任务仅由另一名玩家抽到。完成后指定同行见证。不要执行危险、冒犯、违法、涉及隐私财物或影响陌生人的任务；任何人不舒服都应立即停止。",
+      content: "最多保留 3 个抽取额度，每次使用后 6 小时恢复；每条密令限时 2 小时。每个新房间会随机选出一名隐藏任务设计者，任务仅由另一名玩家抽到。完成后指定同行见证。不要执行危险、冒犯、违法、涉及隐私财物或影响陌生人的任务；任何人不舒服都应立即停止。",
       showCancel: false,
       confirmText: "明白",
     });
@@ -690,4 +714,6 @@ module.exports = {
   buildHiddenMission,
   formatReviewDate,
   timeLeft,
+  timeUntil,
+  drawAvailability,
 };

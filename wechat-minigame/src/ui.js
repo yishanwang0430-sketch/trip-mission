@@ -346,7 +346,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.1.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.2.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -362,6 +362,8 @@ class GameRenderer {
     if (model.room) {
       const online = model.room.players.filter((player) => player.online).length;
       this.text(`${model.room.roomCode} · ${online}在线`, 66, this.safeTop + 44, 11, COLORS.muted, "left", "400");
+      this.text("退出", this.width - 78, this.safeTop + 31, 12, COLORS.redDark, "center", "600");
+      this.hit("leave_local", this.width - 104, this.safeTop + 6, 48, 48);
       this.icon("more", this.width - 30, this.safeTop + 30, COLORS.ink, 20);
       this.hit("room_menu", this.width - 54, this.safeTop + 6, 48, 48);
     }
@@ -587,9 +589,9 @@ class GameRenderer {
   drawEmptyMission(model, y) {
     this.panel(20, y, this.width - 40, 250, COLORS.paper, COLORS.line, 8);
     this.icon("seal", this.width / 2, y + 72, model.remainingDraws ? COLORS.red : COLORS.muted, 52);
-    const title = model.remainingDraws ? "抽取一份私密任务" : "今日密令已抽完";
+    const title = model.remainingDraws ? "抽取一份私密任务" : "抽取额度已用完";
     this.text(title, this.width / 2, y + 122, 19, COLORS.ink, "center", "700");
-    this.text(model.remainingDraws ? `今天还有 ${model.remainingDraws} 次机会` : "明天再来，或等待复盘", this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
+    this.text(model.remainingDraws ? `还剩 ${model.remainingDraws} 次 · 每次使用后 6 小时恢复` : model.drawRefreshLabel, this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
     this.button({ x: 54, y: y + 178, width: this.width - 108, height: 50, label: "随机抽取", action: "draw_task", icon: "dice", disabled: model.remainingDraws <= 0 });
   }
 
