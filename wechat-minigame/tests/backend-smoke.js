@@ -48,8 +48,47 @@ async function run() {
       p_name: "1234567890123",
     }, "INVALID_NAME");
 
-    const started = await rpc("start_secret_room", { p_room_code: code, p_device_token: ownerToken });
+    const prepared = await rpc("start_secret_room", { p_room_code: code, p_device_token: ownerToken });
+    assert.equal(prepared.status, "lobby");
+    assert.equal(prepared.hiddenTask.status, "editing");
+
+    const members = [
+      { token: ownerToken, name: "山山队长" },
+      { token: witnessToken, name: "Mars-7" },
+      { token: thirdToken, name: "小王同学" },
+    ];
+    const setupViews = await Promise.all(members.map(async (member) => ({
+      ...member,
+      room: await rpc("get_secret_room", { p_room_code: code, p_device_token: member.token }),
+    })));
+    const editor = setupViews.find((member) => member.room.hiddenTask.isEditor);
+    assert.ok(editor);
+
+    const started = await rpc("submit_secret_hidden_task", {
+      p_room_code: code,
+      p_device_token: editor.token,
+      p_description: "让任意一位同行主动提议拍一张安全的三人合照。",
+    });
     assert.equal(started.status, "playing");
+    assert.equal(started.hiddenTask.status, "ready");
+
+    const playingViews = await Promise.all(members.map(async (member) => ({
+      ...member,
+      room: await rpc("get_secret_room", { p_room_code: code, p_device_token: member.token }),
+    })));
+    const assignee = playingViews.find((member) => member.room.hiddenTask.availableForSelf);
+    assert.ok(assignee);
+    assert.notEqual(assignee.token, editor.token);
+    const nonAssignee = playingViews.find((member) => member.token !== assignee.token);
+    await expectRpcError("take_secret_hidden_task", {
+      p_room_code: code,
+      p_device_token: nonAssignee.token,
+    }, "HIDDEN_TASK_NOT_ASSIGNED");
+    const hidden = await rpc("take_secret_hidden_task", { p_room_code: code, p_device_token: assignee.token });
+    assert.equal(hidden.task.taskId, "X01");
+    assert.equal(hidden.task.isHidden, true);
+    assert.equal(hidden.room.hiddenTask.status, "claimed");
+
     const witness = started.players.find((player) => player.name === "Mars-7");
     const third = started.players.find((player) => player.name === "小王同学");
 
@@ -152,7 +191,7 @@ async function run() {
     assert.equal(ended.status, "ended");
     deleted = await rpc("delete_secret_room", { p_room_code: code, p_device_token: ownerToken });
     assert.equal(deleted, true);
-    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, ownerScore: 3, witnessScore: 1, dailyLimitEnforced: true, deleted }));
+    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, hiddenTaskAssigned: true, ownerScore: 3, witnessScore: 1, dailyLimitEnforced: true, deleted }));
   } finally {
     if (!deleted) console.error(`Smoke room ${code} requires manual cleanup.`);
   }

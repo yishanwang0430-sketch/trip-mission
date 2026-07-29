@@ -124,6 +124,7 @@ class GameRenderer {
 
     if (model.screen === "home") this.drawHome(model);
     else if (model.screen === "lobby") this.drawLobby(model);
+    else if (model.screen === "hidden_editor") this.drawHiddenEditor(model);
     else if (model.screen === "missions") this.drawMissions(model);
     else if (model.screen === "ranking") this.drawRanking(model);
     else if (model.screen === "review") this.drawReview(model);
@@ -345,7 +346,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.0.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.1.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -399,12 +400,61 @@ class GameRenderer {
 
     const rows = Math.ceil(room.players.length / 3);
     const actionY = Math.max(this.height - this.safeBottom - 76, routeY + 214 + rows * 86);
-    if (room.self.isOwner) {
-      this.button({ x: 20, y: actionY, width: this.width - 40, height: 52, label: "开始旅程", action: "start_room", icon: "dice", disabled: room.players.length < 3 });
+    const hidden = room.hiddenTask || { status: "unassigned", isEditor: false };
+    if (hidden.status === "editing" && hidden.isEditor) {
+      const editorActionY = Math.max(this.height - this.safeBottom - 124, routeY + 214 + rows * 86);
+      this.panel(20, editorActionY - 8, this.width - 40, 116, COLORS.goldSoft, "#ddc38c", 8);
+      this.icon("seal", 44, editorActionY + 18, COLORS.red, 22);
+      this.text("你获得了隐藏任务设计资格", 64, editorActionY + 10, 14, COLORS.ink, "left", "700");
+      this.text("提交后自动开局，且你本人不会抽到", 64, editorActionY + 34, 11, "#755d34", "left", "400");
+      this.button({ x: 34, y: editorActionY + 54, width: this.width - 68, height: 44, label: "查看安全约定并编辑", action: "open_hidden_editor", icon: "seal" });
+    } else if (hidden.status === "editing") {
+      this.panel(20, actionY, this.width - 40, 66, COLORS.paperWarm, "#e2d4b5", 8);
+      this.text("隐藏任务设计中", 36, actionY + 22, 14, "#755d34", "left", "700");
+      this.text("提交后自动开局，请在此等待", 36, actionY + 45, 11, COLORS.muted, "left", "400");
+    } else if (room.self.isOwner) {
+      this.button({ x: 20, y: actionY, width: this.width - 40, height: 52, label: "抽选设计者并准备开局", action: "start_room", icon: "dice", disabled: room.players.length < 3 });
     } else {
       this.panel(20, actionY, this.width - 40, 52, COLORS.paperWarm, "#e2d4b5", 8);
-      this.text("等待房主发出第一道密令", this.width / 2, actionY + 26, 14, "#755d34", "center", "500");
+      this.text("等待房主抽选隐藏任务设计者", this.width / 2, actionY + 26, 14, "#755d34", "center", "500");
     }
+  }
+
+  drawHiddenEditor(model) {
+    this.drawHeader(model, "设计隐藏任务");
+    let y = this.headerHeight + 18;
+    this.panel(20, y, this.width - 40, 70, COLORS.goldSoft, "#ddc38c", 8);
+    this.icon("seal", 46, y + 35, COLORS.red, 24);
+    this.text("你是本房唯一的任务设计者", 68, y + 24, 15, COLORS.ink, "left", "700");
+    this.text("任务会随机交给另一名同行", 68, y + 48, 11, "#755d34", "left", "400");
+    y += 86;
+
+    this.panel(20, y, this.width - 40, 230, COLORS.paper, COLORS.line, 8);
+    this.text("提交前请确认", 36, y + 27, 16, COLORS.ink, "left", "700");
+    const rules = [
+      "不要求肢体接触、饮酒或危险动作",
+      "不涉及隐私、财物、陌生人或违法内容",
+      "不羞辱、不惊吓，不让任何人感到为难",
+      "任何人不舒服都可以立即停止",
+      "提交后不可修改，你本人不会抽到",
+    ];
+    rules.forEach((rule, index) => {
+      const rowY = y + 62 + index * 31;
+      this.ctx.beginPath(); this.ctx.arc(40, rowY, 3, 0, Math.PI * 2); this.ctx.fillStyle = COLORS.jade; this.ctx.fill();
+      this.text(rule, 52, rowY, 13, index === 4 ? COLORS.redDark : COLORS.ink, "left", index === 4 ? "600" : "400");
+    });
+    y += 246;
+
+    this.panel(20, y, this.width - 40, 104, COLORS.blueSoft, "#b8cfdb", 8);
+    this.text("合适示例", 36, y + 24, 12, COLORS.blue, "left", "700");
+    this.wrapText("让任意一位同行主动提议拍一张合照。", 36, y + 52, this.width - 72, 22, 2, { size: 14, color: COLORS.ink, weight: "500" });
+    y += 120;
+
+    this.button({ x: 20, y, width: this.width - 40, height: 52, label: "我已理解，开始填写", action: "edit_hidden_task", icon: "check" });
+    this.hit("close_hidden_editor", this.width / 2 - 72, y + 62, 144, 38);
+    this.icon("back", this.width / 2 - 50, y + 81, COLORS.muted, 16);
+    this.text("返回同行大厅", this.width / 2 + 8, y + 81, 12, COLORS.muted, "center", "500");
+    this.drawHeader(model, "设计隐藏任务");
   }
 
   drawScoreStrip(model, y) {
@@ -450,7 +500,7 @@ class GameRenderer {
       return;
     }
 
-    this.text(`${task.score} 分密令`, x + 34, y + 40, 12, task.score === 3 ? COLORS.redDark : COLORS.jadeDark, "left", "700");
+    this.text(task.isHidden ? "本轮隐藏任务 · 3 分" : `${task.score} 分密令`, x + 34, y + 40, 12, task.score === 3 ? COLORS.redDark : COLORS.jadeDark, "left", "700");
     this.text(task.code, x + width - 34, y + 40, 11, "#8d8066", "right", "500");
     this.wrapText(task.description, x + 34, y + 84, width - 68, 28, 5, { size: 18, color: COLORS.ink, weight: "600" });
     this.text(`目标 ${task.targetName}`, x + 34, y + height - 54, 12, "#735f43", "left", "500");
@@ -478,6 +528,16 @@ class GameRenderer {
     return 76;
   }
 
+  drawHiddenTaskPanel(task, y) {
+    if (!task.isHidden) return 0;
+    this.panel(20, y, this.width - 40, 66, COLORS.redSoft, "#d7aaa5", 8);
+    this.icon("seal", 42, y + 33, COLORS.red, 21);
+    this.text("本轮隐藏任务", 60, y + 21, 13, COLORS.redDark, "left", "700");
+    this.text("由同行设计，仅此一份", 60, y + 45, 11, COLORS.muted, "left", "400");
+    this.text("3 分", this.width - 34, y + 33, 15, COLORS.redDark, "right", "700");
+    return 76;
+  }
+
   drawMissions(model) {
     this.drawHeader(model, "今日密令");
     const offset = -this.currentScroll();
@@ -491,6 +551,7 @@ class GameRenderer {
     }
 
     if (model.activeTask) {
+      y += this.drawHiddenTaskPanel(model.activeTask, y);
       y += this.drawRandomWordPanel(model.activeTask, y);
       this.drawWoodBoard(20, y, this.width - 40, 300, model.activeTask);
       y += 314;

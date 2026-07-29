@@ -17,6 +17,12 @@ const ERROR_MESSAGES = {
   INVALID_PLAY_DATE: "任务日期无效",
   DAILY_LIMIT: "今天已经提交过 2 次计分",
   PENDING_CLAIMS: "还有待见证任务，确认后才能结束旅程",
+  HIDDEN_TASK_EDITOR_ONLY: "只有本轮抽中的设计者可以编辑隐藏任务",
+  HIDDEN_TASK_LOCKED: "隐藏任务已经提交，不能再次修改",
+  HIDDEN_TASK_NOT_ASSIGNED: "这条隐藏任务不属于你",
+  HIDDEN_TASK_NOT_READY: "隐藏任务尚未准备完成",
+  INVALID_HIDDEN_TASK: "隐藏任务需填写 8–80 个字符",
+  UNSAFE_HIDDEN_TASK: "任务包含不适合旅行游戏的内容，请重新设计",
 };
 
 function friendlyError(payload, fallback = "联机操作失败") {
@@ -65,6 +71,16 @@ module.exports = {
   },
   startRoom(code, token) {
     return rpc("start_secret_room", { p_room_code: code, p_device_token: token });
+  },
+  submitHiddenTask(code, token, description) {
+    return rpc("submit_secret_hidden_task", {
+      p_room_code: code,
+      p_device_token: token,
+      p_description: description,
+    });
+  },
+  takeHiddenTask(code, token) {
+    return rpc("take_secret_hidden_task", { p_room_code: code, p_device_token: token });
   },
   setPresence(code, token, present) {
     return rpc("set_secret_presence", { p_room_code: code, p_device_token: token, p_present: present });

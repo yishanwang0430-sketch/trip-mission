@@ -7,6 +7,12 @@ function players(count) {
 }
 
 test("task library contains all three score tiers and supports dynamic groups", () => {
+  assert.equal(TASKS.length, 100);
+  assert.equal(new Set(TASKS.map((task) => task.id)).size, 100);
+  assert.deepEqual(
+    [1, 2, 3].map((score) => TASKS.filter((task) => task.score === score).length),
+    [40, 35, 25],
+  );
   assert.deepEqual([...new Set(TASKS.map((task) => task.score))].sort(), [1, 2, 3]);
   assert.ok(TASKS.every((task) => task.minPlayers >= 2 && task.minPlayers <= 4));
   assert.ok(TASKS.every((task) => (
@@ -36,7 +42,7 @@ test("draw avoids a recently used task when another task is available", () => {
 });
 
 test("stores the selected daily words on the mission until the next draw", () => {
-  const values = [0.5, 0.85, 0, 0, 0, 0, 0, 0];
+  const values = [0.5, 0.23, 0, 0, 0, 0, 0, 0];
   let index = 0;
   const task = drawMission({
     players: players(4),

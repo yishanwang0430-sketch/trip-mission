@@ -28,6 +28,16 @@ create table if not exists public.secret_players (
 alter table public.secret_players
   add column if not exists is_present boolean not null default true;
 
+alter table public.secret_rooms
+  add column if not exists hidden_editor_player_id uuid,
+  add column if not exists hidden_assignee_player_id uuid,
+  add column if not exists hidden_task_status text not null default 'unassigned',
+  add column if not exists hidden_task_text text,
+  add column if not exists hidden_task_uid text,
+  add column if not exists hidden_task_code text,
+  add column if not exists hidden_task_submitted_at timestamptz,
+  add column if not exists hidden_task_claimed_at timestamptz;
+
 do $$
 begin
   if not exists (
@@ -36,6 +46,27 @@ begin
     alter table public.secret_rooms
       add constraint secret_rooms_owner_player_id_fkey
       foreign key (owner_player_id) references public.secret_players(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'secret_rooms_hidden_editor_player_id_fkey'
+  ) then
+    alter table public.secret_rooms
+      add constraint secret_rooms_hidden_editor_player_id_fkey
+      foreign key (hidden_editor_player_id) references public.secret_players(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'secret_rooms_hidden_assignee_player_id_fkey'
+  ) then
+    alter table public.secret_rooms
+      add constraint secret_rooms_hidden_assignee_player_id_fkey
+      foreign key (hidden_assignee_player_id) references public.secret_players(id) on delete set null;
+  end if;
+  if not exists (
+    select 1 from pg_constraint where conname = 'secret_rooms_hidden_task_status_check'
+  ) then
+    alter table public.secret_rooms
+      add constraint secret_rooms_hidden_task_status_check
+      check (hidden_task_status in ('unassigned', 'editing', 'ready', 'claimed'));
   end if;
 end;
 $$;
@@ -200,7 +231,18 @@ begin
         on award.room_id = review.room_id and award.reviewed_on = review.reviewed_on
       where review.room_id = v_room.id
         and review.reviewed_on = v_room.current_review_on
-    ), '[]'::jsonb)
+    ), '[]'::jsonb),
+    'hiddenTask', jsonb_build_object(
+      'status', v_room.hidden_task_status,
+      'isEditor', v_self.id = v_room.hidden_editor_player_id,
+      'needsSubmission', v_room.hidden_task_status = 'editing',
+      'availableForSelf', v_self.id = v_room.hidden_assignee_player_id
+        and v_room.hidden_task_status in ('ready', 'claimed'),
+      'taskUid', case
+        when v_self.id = v_room.hidden_assignee_player_id then v_room.hidden_task_uid
+        else null
+      end
+    )
   );
 end;
 $$;
@@ -395,6 +437,8 @@ as $$
 declare
   v_room public.secret_rooms;
   v_self_id uuid;
+  v_editor_id uuid;
+  v_assignee_id uuid;
 begin
   select room.* into v_room
   from public.secret_rooms room
@@ -408,12 +452,144 @@ begin
   where room_id = v_room.id and device_token_hash = public.secret_token_hash(p_device_token);
   if v_self_id <> v_room.owner_player_id then raise exception 'OWNER_ONLY'; end if;
   if v_room.status <> 'lobby' then raise exception 'INVALID_ROOM_STATUS'; end if;
-  if (select count(*) from public.secret_players where room_id = v_room.id) < 3 then
+  if (select count(*) from public.secret_players where room_id = v_room.id and is_present) < 3 then
     raise exception 'NOT_ENOUGH_PLAYERS';
   end if;
 
-  update public.secret_rooms set status = 'playing', started_at = now() where id = v_room.id;
+  if v_room.hidden_task_status = 'unassigned' then
+    select id into v_editor_id
+    from public.secret_players
+    where room_id = v_room.id and is_present
+    order by random()
+    limit 1;
+
+    select id into v_assignee_id
+    from public.secret_players
+    where room_id = v_room.id and is_present and id <> v_editor_id
+    order by random()
+    limit 1;
+
+    update public.secret_rooms
+    set hidden_editor_player_id = v_editor_id,
+        hidden_assignee_player_id = v_assignee_id,
+        hidden_task_status = 'editing'
+    where id = v_room.id;
+  elsif v_room.hidden_task_status <> 'editing' then
+    raise exception 'INVALID_ROOM_STATUS';
+  end if;
+
   return public.secret_room_payload(v_room.id, p_device_token);
+end;
+$$;
+
+create or replace function public.submit_secret_hidden_task(
+  p_room_code text,
+  p_device_token uuid,
+  p_description text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_room public.secret_rooms;
+  v_editor public.secret_players;
+  v_description text;
+begin
+  select * into v_room
+  from public.secret_rooms
+  where code = trim(p_room_code)
+  for update;
+  if not found then raise exception 'ROOM_NOT_FOUND'; end if;
+
+  select * into v_editor
+  from public.secret_players
+  where room_id = v_room.id
+    and device_token_hash = public.secret_token_hash(p_device_token);
+  if not found then raise exception 'INVALID_MEMBER'; end if;
+  if v_editor.id <> v_room.hidden_editor_player_id then
+    raise exception 'HIDDEN_TASK_EDITOR_ONLY';
+  end if;
+  if v_room.status <> 'lobby' or v_room.hidden_task_status <> 'editing' then
+    raise exception 'HIDDEN_TASK_LOCKED';
+  end if;
+
+  v_description := regexp_replace(trim(coalesce(p_description, '')), '[[:space:]]+', ' ', 'g');
+  if char_length(v_description) not between 8 and 80
+    or v_description ~ '[[:cntrl:]]' then
+    raise exception 'INVALID_HIDDEN_TASK';
+  end if;
+  if v_description ~* '(亲吻|接吻|脱衣|裸露|打人|踢人|推人|绊倒|灌酒|喝酒|抽烟|药物|转账|付款|密码|证件|护照|行李|偷拿|偷拍|陌生人|开车|驾驶|闯红灯|攀爬|高处|下水|游泳|违法|侮辱|辱骂|歧视|性行为|赌博)' then
+    raise exception 'UNSAFE_HIDDEN_TASK';
+  end if;
+
+  update public.secret_rooms
+  set hidden_task_text = v_description,
+      hidden_task_uid = 'hidden-' || gen_random_uuid()::text,
+      hidden_task_code = 'X01-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 3)),
+      hidden_task_status = 'ready',
+      hidden_task_submitted_at = now(),
+      status = 'playing',
+      started_at = now()
+  where id = v_room.id;
+
+  return public.secret_room_payload(v_room.id, p_device_token);
+end;
+$$;
+
+create or replace function public.take_secret_hidden_task(
+  p_room_code text,
+  p_device_token uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_room public.secret_rooms;
+  v_player public.secret_players;
+begin
+  select * into v_room
+  from public.secret_rooms
+  where code = trim(p_room_code)
+  for update;
+  if not found then raise exception 'ROOM_NOT_FOUND'; end if;
+  if v_room.status <> 'playing' then raise exception 'INVALID_ROOM_STATUS'; end if;
+
+  select * into v_player
+  from public.secret_players
+  where room_id = v_room.id
+    and device_token_hash = public.secret_token_hash(p_device_token);
+  if not found then raise exception 'INVALID_MEMBER'; end if;
+  if v_player.id <> v_room.hidden_assignee_player_id then
+    raise exception 'HIDDEN_TASK_NOT_ASSIGNED';
+  end if;
+  if v_room.hidden_task_status not in ('ready', 'claimed')
+    or v_room.hidden_task_text is null
+    or v_room.hidden_task_uid is null then
+    raise exception 'HIDDEN_TASK_NOT_READY';
+  end if;
+
+  if v_room.hidden_task_status = 'ready' then
+    update public.secret_rooms
+    set hidden_task_status = 'claimed', hidden_task_claimed_at = now()
+    where id = v_room.id;
+  end if;
+
+  return jsonb_build_object(
+    'task', jsonb_build_object(
+      'uid', v_room.hidden_task_uid,
+      'taskId', 'X01',
+      'code', v_room.hidden_task_code,
+      'score', 3,
+      'targetName', '本轮隐藏任务',
+      'description', v_room.hidden_task_text,
+      'isHidden', true
+    ),
+    'room', public.secret_room_payload(v_room.id, p_device_token)
+  );
 end;
 $$;
 
@@ -498,9 +674,17 @@ begin
     where task_uid = left(p_task_uid, 80) and player_id = v_player.id
   ) then return public.secret_room_payload(v_room.id, p_device_token); end if;
   if not (
-    (p_task_id ~ '^L(0[1-9]|1[0-2])$' and p_points = 1)
-    or (p_task_id ~ '^M(0[1-9]|10)$' and p_points = 2)
-    or (p_task_id ~ '^H0[1-8]$' and p_points = 3)
+    (p_task_id ~ '^L(0[1-9]|[12][0-9]|3[0-9]|40)$' and p_points = 1)
+    or (p_task_id ~ '^M(0[1-9]|[12][0-9]|3[0-5])$' and p_points = 2)
+    or (p_task_id ~ '^H(0[1-9]|1[0-9]|2[0-5])$' and p_points = 3)
+    or (
+      p_task_id = 'X01'
+      and p_points = 3
+      and v_room.hidden_assignee_player_id = v_player.id
+      and v_room.hidden_task_status = 'claimed'
+      and v_room.hidden_task_uid = left(p_task_uid, 80)
+      and v_room.hidden_task_code = left(p_task_code, 32)
+    )
   ) then raise exception 'INVALID_TASK'; end if;
   if p_played_on < current_date - 1 or p_played_on > current_date + 1 then
     raise exception 'INVALID_PLAY_DATE';
@@ -688,6 +872,8 @@ revoke all on function public.create_secret_room(text, uuid, integer) from publi
 revoke all on function public.join_secret_room(text, text, uuid) from public, authenticated;
 revoke all on function public.get_secret_room(text, uuid) from public, authenticated;
 revoke all on function public.start_secret_room(text, uuid) from public, authenticated;
+revoke all on function public.submit_secret_hidden_task(text, uuid, text) from public, authenticated;
+revoke all on function public.take_secret_hidden_task(text, uuid) from public, authenticated;
 revoke all on function public.set_secret_presence(text, uuid, boolean) from public, authenticated;
 revoke all on function public.update_secret_name(text, uuid, text) from public, authenticated;
 revoke all on function public.set_secret_room_status(text, uuid, text, date) from public, authenticated;
@@ -701,6 +887,8 @@ grant execute on function public.create_secret_room(text, uuid, integer) to anon
 grant execute on function public.join_secret_room(text, text, uuid) to anon;
 grant execute on function public.get_secret_room(text, uuid) to anon;
 grant execute on function public.start_secret_room(text, uuid) to anon;
+grant execute on function public.submit_secret_hidden_task(text, uuid, text) to anon;
+grant execute on function public.take_secret_hidden_task(text, uuid) to anon;
 grant execute on function public.set_secret_presence(text, uuid, boolean) to anon;
 grant execute on function public.update_secret_name(text, uuid, text) to anon;
 grant execute on function public.set_secret_room_status(text, uuid, text, date) to anon;

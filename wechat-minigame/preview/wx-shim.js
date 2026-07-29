@@ -5,11 +5,13 @@
   const demoMode = params.get("demo") || "home";
   const playerNames = ["一山", "阿禾", "小满", "青川", "南星", "木木", "可乐", "石榴", "松风", "朝露", "云舟", "听雨"];
   const demoCount = Math.max(3, Math.min(12, Number(params.get("count")) || 8));
+  const hiddenEditorDemo = demoMode === "hidden-editor";
+  const hiddenTaskDemo = demoMode === "hidden-task";
   const room = {
     roomId: "11111111-1111-4111-8111-111111111111",
     roomCode: "618205",
     maxPlayers: demoCount,
-    status: demoMode === "review" ? "review" : demoMode === "ended" ? "ended" : demoMode === "lobby" ? "lobby" : "playing",
+    status: demoMode === "review" ? "review" : demoMode === "ended" ? "ended" : ["lobby", "hidden-editor"].includes(demoMode) ? "lobby" : "playing",
     ownerPlayerId: "player-1",
     currentReviewOn: demoMode === "review" ? "2026-07-28" : null,
     self: { id: "player-1", seat: 1, name: "一山", isOwner: true },
@@ -30,6 +32,11 @@
       { playerId: "player-2", playerName: "阿禾", playerSeat: 2, note: "最好笑的一次", isWinner: false },
       { playerId: "player-3", playerName: "小满", playerSeat: 3, note: "最默契的一次", isWinner: false },
     ] : [],
+    hiddenTask: hiddenEditorDemo
+      ? { status: "editing", isEditor: true, needsSubmission: true, availableForSelf: false, taskUid: null }
+      : hiddenTaskDemo
+        ? { status: "claimed", isEditor: false, needsSubmission: false, availableForSelf: true, taskUid: "hidden-demo-1" }
+        : { status: demoMode === "lobby" ? "unassigned" : "claimed", isEditor: false, needsSubmission: false, availableForSelf: false, taskUid: null },
   };
 
   if (demoMode !== "home") {
@@ -45,6 +52,12 @@
         description: "让4号 · 青川先向你推荐一道菜、歌或景点，随后自然说出“真的”。",
         drawnAt: Date.now() - 600000, expiresAt: Date.now() + 6600000,
         playedOn: "2026-07-28", revealed: true,
+      } : hiddenTaskDemo ? {
+        uid: "hidden-demo-1", taskId: "X01", code: "X01-7MX", score: 3,
+        targetId: null, targetName: "本轮隐藏任务", randomWords: [], isHidden: true,
+        description: "让任意一位同行主动发起一次安全的三人合照，并完成拍摄。",
+        drawnAt: Date.now() - 300000, expiresAt: Date.now() + 6900000,
+        playedOn: "2026-07-29", revealed: true,
       } : null,
       history: [
         { uid: "history-1", code: "L04-3CA", taskId: "L04", score: 1, targetName: "2号 · 阿禾", playedOn: "2026-07-28", status: "approved" },
@@ -100,7 +113,27 @@
         respond(options, room);
       }
       else if (name === "get_secret_room") respond(options, room);
-      else if (name === "start_secret_room") { room.status = "playing"; respond(options, room); }
+      else if (name === "start_secret_room") {
+        room.status = "lobby";
+        room.hiddenTask = { status: "editing", isEditor: true, needsSubmission: true, availableForSelf: false, taskUid: null };
+        respond(options, room);
+      }
+      else if (name === "submit_secret_hidden_task") {
+        room.status = "playing";
+        room.hiddenTask = { status: "ready", isEditor: true, needsSubmission: false, availableForSelf: false, taskUid: null };
+        respond(options, room);
+      }
+      else if (name === "take_secret_hidden_task") {
+        room.hiddenTask.status = "claimed";
+        respond(options, {
+          task: {
+            uid: "hidden-demo-1", taskId: "X01", code: "X01-7MX", score: 3,
+            targetName: "本轮隐藏任务", isHidden: true,
+            description: "让任意一位同行主动发起一次安全的三人合照，并完成拍摄。",
+          },
+          room,
+        });
+      }
       else if (name === "set_secret_presence") { room.players[0].present = options.data.p_present; respond(options, room); }
       else if (name === "update_secret_name") { room.self.name = options.data.p_name; room.players[0].name = options.data.p_name; respond(options, room); }
       else if (name === "set_secret_room_status") { room.status = options.data.p_status; room.currentReviewOn = options.data.p_reviewed_on || room.currentReviewOn; respond(options, room); }

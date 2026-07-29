@@ -15,12 +15,45 @@ const RECORD_STATUS = {
 };
 
 const REVIEW_PRESETS = ["最好笑的一次", "最巧妙的一次", "最默契的一次", "最意外的一次", "今天很顺利", "期待明天继续"];
+const HIDDEN_TASK_FORBIDDEN = /(亲吻|接吻|脱衣|裸露|打人|踢人|推人|绊倒|灌酒|喝酒|抽烟|药物|转账|付款|密码|证件|护照|行李|偷拿|偷拍|陌生人|开车|驾驶|闯红灯|攀爬|高处|下水|游泳|违法|侮辱|辱骂|歧视|性行为|赌博)/i;
 
 function normalizePlayerName(value) {
   const name = String(value || "").trim();
   if (Array.from(name).length < 1 || Array.from(name).length > 12) return null;
   if (/[\u0000-\u001f\u007f]/.test(name)) return null;
   return name;
+}
+
+function validateHiddenTask(value) {
+  const description = String(value || "").trim().replace(/\s+/g, " ");
+  if (Array.from(description).length < 8 || Array.from(description).length > 80 || /[\u0000-\u001f\u007f]/.test(description)) {
+    return { value: null, error: "请填写 8–80 个字符的完整任务" };
+  }
+  if (HIDDEN_TASK_FORBIDDEN.test(description)) {
+    return { value: null, error: "内容涉及安全、隐私或他人边界，请重新设计" };
+  }
+  return { value: description, error: "" };
+}
+
+function buildHiddenMission(task, now = Date.now()) {
+  if (!task?.uid || task.taskId !== "X01" || task.score !== 3 || !task.description) {
+    throw new Error("隐藏任务数据无效，请稍后重试");
+  }
+  return {
+    uid: task.uid,
+    taskId: "X01",
+    code: task.code,
+    score: 3,
+    targetId: null,
+    targetName: task.targetName || "本轮隐藏任务",
+    randomWords: [],
+    description: task.description,
+    isHidden: true,
+    drawnAt: now,
+    expiresAt: now + config.taskExpiryMs,
+    playedOn: dateKey(new Date(now)),
+    revealed: false,
+  };
 }
 
 function formatReviewDate(key) {
@@ -186,10 +219,10 @@ class TravelSecretGame {
     saveState(this.local);
 
     if (preferredScreen) this.screen = preferredScreen;
-    else if (room.status === "lobby") this.screen = "lobby";
+    else if (room.status === "lobby" && this.screen !== "hidden_editor") this.screen = "lobby";
     else if (room.status === "review" && oldStatus !== "review") this.screen = "review";
     else if (room.status === "ended") this.screen = "ranking";
-    else if (room.status === "playing" && ["home", "lobby"].includes(this.screen)) this.screen = "missions";
+    else if (room.status === "playing" && ["home", "lobby", "hidden_editor"].includes(this.screen)) this.screen = "missions";
     this.startPolling();
     this.render();
   }
@@ -313,12 +346,58 @@ class TravelSecretGame {
   async startRoom() {
     await this.runBusy(async () => {
       const room = await api.startRoom(this.room.roomCode, this.token);
-      this.setRoom(room, "missions");
-      this.showToast("旅程开始，密令已启封");
+      this.setRoom(room);
+      if (room.hiddenTask?.isEditor) {
+        this.screen = "hidden_editor";
+        this.renderer.resetScroll("hidden_editor");
+        this.render();
+        this.showToast("你被抽中设计本房隐藏任务");
+      } else {
+        this.showToast("隐藏任务设计者已抽出，提交后自动开局");
+      }
     });
   }
 
-  drawTask() {
+  openHiddenEditor() {
+    if (!this.room?.hiddenTask?.isEditor || this.room.hiddenTask.status !== "editing") {
+      return this.showToast("你不是本轮隐藏任务设计者");
+    }
+    this.screen = "hidden_editor";
+    this.renderer.resetScroll("hidden_editor");
+    this.render();
+  }
+
+  closeHiddenEditor() {
+    this.screen = "lobby";
+    this.renderer.resetScroll("lobby");
+    this.render();
+  }
+
+  async editHiddenTask() {
+    if (!this.room?.hiddenTask?.isEditor || this.room.hiddenTask.status !== "editing") {
+      return this.showToast("隐藏任务已经锁定");
+    }
+    const entered = await promptText(
+      "填写隐藏任务",
+      "8–80 字，例如：让任意同行主动提议拍一张合照",
+    );
+    if (entered === null) return;
+    const checked = validateHiddenTask(entered);
+    if (!checked.value) return this.showToast(checked.error);
+    const accepted = await confirm(
+      "确认提交隐藏任务？",
+      `${checked.value}\n\n提交后不可修改；设计者本人不会抽到。`,
+      "确认提交",
+    );
+    if (!accepted) return;
+    await this.runBusy(async () => {
+      const room = await api.submitHiddenTask(this.room.roomCode, this.token, checked.value);
+      this.setRoom(room, "missions");
+      this.showToast("隐藏任务已混入任务池，旅程开始");
+    });
+  }
+
+  async drawTask() {
     if (!this.room) return this.showToast("房间尚未同步，请稍后再试");
     if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
     if (this.local.activeTask) return this.showToast("请先完成当前密令");
@@ -328,6 +407,21 @@ class TravelSecretGame {
       const presentPlayers = this.room.players.filter((player) => player.present !== false);
       if (!presentPlayers.some((player) => player.id === this.room.self.id)) {
         return this.showToast("请先在房间菜单中重新归队");
+      }
+      const hidden = this.room.hiddenTask;
+      const hiddenAlreadyKnown = hidden?.taskUid && (
+        this.local.activeTask?.uid === hidden.taskUid
+        || this.local.history.some((record) => record.uid === hidden.taskUid)
+      );
+      if (hidden?.availableForSelf && hidden.taskUid && !hiddenAlreadyKnown) {
+        await this.runBusy(async () => {
+          const result = await api.takeHiddenTask(this.room.roomCode, this.token);
+          this.local.activeTask = buildHiddenMission(result.task);
+          saveState(this.local);
+          this.setRoom(result.room, "missions");
+          this.showToast("你抽中了本轮唯一的隐藏任务");
+        });
+        return;
       }
       this.local.activeTask = drawMission({
         players: presentPlayers,
@@ -522,7 +616,7 @@ class TravelSecretGame {
   showRules() {
     wx.showModal({
       title: "游侠密令规则",
-      content: "每天可抽 2 次密令，每次限时 2 小时。完成后指定一名同行见证，确认后按难度获得 1–3 分。不要执行危险、冒犯、违法或影响陌生人的任务；任何人不舒服都应立即停止。每日可复盘一次，房主评选最佳妙计 +1 分。",
+      content: "每天可抽 2 次密令，每次限时 2 小时。每个新房间会随机选出一名隐藏任务设计者，任务仅由另一名玩家抽到。完成后指定同行见证。不要执行危险、冒犯、违法、涉及隐私财物或影响陌生人的任务；任何人不舒服都应立即停止。",
       showCancel: false,
       confirmText: "明白",
     });
@@ -558,6 +652,9 @@ class TravelSecretGame {
       show_rules: () => this.showRules(),
       share_room: () => this.shareRoom(),
       start_room: () => this.startRoom(),
+      open_hidden_editor: () => this.openHiddenEditor(),
+      close_hidden_editor: () => this.closeHiddenEditor(),
+      edit_hidden_task: () => this.editHiddenTask(),
       room_menu: () => this.roomMenu(),
       draw_task: () => this.drawTask(),
       toggle_task: () => this.toggleTask(),
@@ -584,4 +681,13 @@ class TravelSecretGame {
   }
 }
 
-module.exports = { TravelSecretGame, RECORD_STATUS, REVIEW_PRESETS, normalizePlayerName, formatReviewDate, timeLeft };
+module.exports = {
+  TravelSecretGame,
+  RECORD_STATUS,
+  REVIEW_PRESETS,
+  normalizePlayerName,
+  validateHiddenTask,
+  buildHiddenMission,
+  formatReviewDate,
+  timeLeft,
+};
