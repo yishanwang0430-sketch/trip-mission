@@ -329,7 +329,9 @@ class TravelSecretGame {
   }
 
   drawTask() {
-    if (!this.room || this.room.status !== "playing" || this.local.activeTask) return;
+    if (!this.room) return this.showToast("房间尚未同步，请稍后再试");
+    if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
+    if (this.local.activeTask) return this.showToast("请先完成当前密令");
     const model = this.model();
     if (model.remainingDraws <= 0) return this.showToast("今日抽取次数已用完");
     try {
@@ -723,10 +725,14 @@ module.exports = {
 
 },
 4: function(module, exports, __require) {
-const WORDS = ["随便", "等一下", "我看看", "真的", "可以", "确定", "不知道", "没问题"];
+const WORDS = [
+  "随便", "等一下", "我看看", "真的", "可以", "确定", "不知道", "没问题",
+  "好像", "原来", "马上", "应该", "可能", "当然", "没关系", "再看看",
+  "差不多", "有道理", "然后呢", "你觉得", "怎么办", "太好了", "慢一点", "走吧",
+];
 
 const TASKS = [
-  { id: "L01", score: 1, minPlayers: 2, build: ({ target, word }) => `让${target}在自然对话中说出“${word}”。` },
+  { id: "L01", score: 1, minPlayers: 2, wordCount: 1, build: ({ target, word }) => `让${target}在自然对话中说出“${word}”。` },
   { id: "L02", score: 1, minPlayers: 2, build: ({ target }) => `让${target}问你一个包含“为什么”的问题。` },
   { id: "L03", score: 1, minPlayers: 2, build: ({ target }) => `让${target}主动问现在几点。` },
   { id: "L04", score: 1, minPlayers: 2, build: ({ target }) => `让${target}向你推荐一道菜或一家店。` },
@@ -738,22 +744,22 @@ const TASKS = [
   { id: "L10", score: 1, minPlayers: 2, build: ({ target }) => `让${target}在中文对话中自然说出一个非中文单词。` },
   { id: "L11", score: 1, minPlayers: 2, build: ({ target }) => `让${target}纠正你说错的一个无关紧要的常识。` },
   { id: "L12", score: 1, minPlayers: 3, build: ({ target, other }) => `让${target}把${other}叫到你们当前所在的安全位置。` },
-  { id: "M01", score: 2, minPlayers: 2, build: ({ target, word }) => `10 分钟内，让${target}先说“${word}”，再递给你一件允许的小物品。` },
+  { id: "M01", score: 2, minPlayers: 2, wordCount: 1, build: ({ target, word }) => `10 分钟内，让${target}先说“${word}”，再递给你一件允许的小物品。` },
   { id: "M02", score: 2, minPlayers: 2, build: ({ target }) => `让${target}先纠正一个无关紧要的错误，再继续追问一个相关问题。` },
-  { id: "M03", score: 2, minPlayers: 2, build: ({ target, word }) => `让${target}先向你推荐一道菜、歌或景点，随后自然说出“${word}”。` },
+  { id: "M03", score: 2, minPlayers: 2, wordCount: 1, build: ({ target, word }) => `让${target}先向你推荐一道菜、歌或景点，随后自然说出“${word}”。` },
   { id: "M04", score: 2, minPlayers: 2, build: ({ target }) => `让${target}先说出你的名字，再问你一个包含“为什么”的问题。` },
   { id: "M05", score: 2, minPlayers: 3, build: ({ target, other }) => `让${target}在 10 分钟内向你和${other}询问同一件无害的小事。` },
   { id: "M06", score: 2, minPlayers: 2, build: ({ target }) => `让${target}自然模仿一个安全小动作，随后问你一个问题。` },
   { id: "M07", score: 2, minPlayers: 3, build: ({ target }) => `让${target}提出一项小型集体活动，并让至少另一人同意参加。` },
   { id: "M08", score: 2, minPlayers: 3, build: ({ target, other }) => `让${target}主动询问${other}的菜品、歌曲或景点推荐。` },
-  { id: "M09", score: 2, minPlayers: 2, build: ({ target, word, secondWord }) => `10 分钟内，让${target}自然说出“${word}”和“${secondWord}”。` },
+  { id: "M09", score: 2, minPlayers: 2, wordCount: 2, build: ({ target, word, secondWord }) => `10 分钟内，让${target}自然说出“${word}”和“${secondWord}”。` },
   { id: "M10", score: 2, minPlayers: 2, build: ({ target }) => `让${target}主动决定一次合照的站位或拍摄角度，并完成拍摄。` },
-  { id: "H01", score: 3, minPlayers: 3, build: ({ target, other, word }) => `让${target}在不知情的情况下，引导${other}说出“${word}”。` },
-  { id: "H02", score: 3, minPlayers: 3, build: ({ target, other, word }) => `30 分钟内，让${target}和${other}在互不商量时分别说出“${word}”。` },
+  { id: "H01", score: 3, minPlayers: 3, wordCount: 1, build: ({ target, other, word }) => `让${target}在不知情的情况下，引导${other}说出“${word}”。` },
+  { id: "H02", score: 3, minPlayers: 3, wordCount: 1, build: ({ target, other, word }) => `30 分钟内，让${target}和${other}在互不商量时分别说出“${word}”。` },
   { id: "H03", score: 3, minPlayers: 4, build: ({ target }) => `让${target}主动发起并完成一项至少 3 人参与、5 分钟以内的小活动。` },
   { id: "H04", score: 3, minPlayers: 4, build: ({ target, other }) => `让${target}主动邀请${other}参加一次至少 4 人的合照，并完成拍摄。` },
   { id: "H05", score: 3, minPlayers: 3, build: ({ target, other }) => `让${target}给出一项推荐，并自然说服${other}明确表示赞同。` },
-  { id: "H06", score: 3, minPlayers: 2, build: ({ target, word }) => `15 分钟内，让${target}依次说出你的名字、递给你一件允许物品、再说出“${word}”。` },
+  { id: "H06", score: 3, minPlayers: 2, wordCount: 1, build: ({ target, word }) => `15 分钟内，让${target}依次说出你的名字、递给你一件允许物品、再说出“${word}”。` },
   { id: "H07", score: 3, minPlayers: 3, build: ({ target, other }) => `让${target}纠正你一个无关紧要的错误，再主动请${other}确认。` },
   { id: "H08", score: 3, minPlayers: 3, build: ({ target, other }) => `15 分钟内，让${target}分别向你和${other}提出两个不同问题，其中一个包含“为什么”，另一个包含“哪里”。` },
 ];
@@ -802,6 +808,7 @@ function drawMission({ players, selfId, history = [], random = Math.random, now 
   const word = randomItem(WORDS, random);
   let secondWord = randomItem(WORDS.filter((item) => item !== word), random);
   if (!secondWord) secondWord = "没问题";
+  const randomWords = task.wordCount === 2 ? [word, secondWord] : task.wordCount === 1 ? [word] : [];
   const code = `${task.id}-${Math.floor(random() * 46656).toString(36).padStart(3, "0").toUpperCase()}`;
 
   return {
@@ -811,6 +818,7 @@ function drawMission({ players, selfId, history = [], random = Math.random, now 
     score: task.score,
     targetId: target.id,
     targetName: playerLabel(target),
+    randomWords,
     description: task.build({
       target: playerLabel(target),
       other: playerLabel(other),
@@ -825,7 +833,6 @@ function drawMission({ players, selfId, history = [], random = Math.random, now 
 }
 
 module.exports = { TASKS, WORDS, dateKey, drawMission, playerLabel };
-
 
 },
 5: function(module, exports, __require) {
@@ -928,6 +935,8 @@ const STATUS_LABELS = {
   ended: "旅程结束",
 };
 
+const TOUCH_SLOP = 12;
+
 function getWindowInfo() {
   if (wx.getWindowInfo) return wx.getWindowInfo();
   return wx.getSystemInfoSync();
@@ -976,8 +985,9 @@ class GameRenderer {
       const point = event.touches?.[0];
       if (!point) return;
       const delta = point.clientY - this.touch.startY;
-      if (Math.abs(delta) > 5) this.touch.moved = true;
-      if (this.maxScroll > 0 && this.touch.startY > this.headerHeight && this.touch.startY < this.height - this.navHeight) {
+      const distance = Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y);
+      if (distance > TOUCH_SLOP) this.touch.moved = true;
+      if (this.touch.moved && this.maxScroll > 0 && this.touch.startY > this.headerHeight && this.touch.startY < this.height - this.navHeight) {
         const next = Math.max(0, Math.min(this.maxScroll, this.touch.startScroll - delta));
         this.scrollByScreen[this.model.screen] = next;
         this.render(this.model);
@@ -986,7 +996,7 @@ class GameRenderer {
     wx.onTouchEnd((event) => {
       if (!this.touch) return;
       const point = event.changedTouches?.[0] || this.touch;
-      const moved = this.touch.moved || Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > 8;
+      const moved = this.touch.moved || Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > TOUCH_SLOP;
       if (!moved) {
         const hit = [...this.hits].reverse().find((item) => (
           point.clientX >= item.x && point.clientX <= item.x + item.width
@@ -1242,7 +1252,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.0.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -1364,6 +1374,17 @@ class GameRenderer {
     this.button({ x: this.width - 96, y: y + 80, width: 76, height: 28, label: "确认", action: "approve_claim", payload: claim.id, kind: "primary" });
   }
 
+  drawRandomWordPanel(task, y) {
+    const words = Array.isArray(task.randomWords) ? task.randomWords : [];
+    if (!words.length) return 0;
+    this.panel(20, y, this.width - 40, 66, COLORS.goldSoft, "#ddc38c", 8);
+    this.icon("dice", 42, y + 33, COLORS.gold, 20);
+    this.text("本轮随机词", 60, y + 20, 11, "#71521c", "left", "600");
+    this.text(words.map((word) => `“${word}”`).join("  "), 60, y + 44, 17, COLORS.ink, "left", "700");
+    this.text("随任务锁定", this.width - 34, y + 33, 10, "#846f50", "right", "500");
+    return 76;
+  }
+
   drawMissions(model) {
     this.drawHeader(model, "今日密令");
     const offset = -this.currentScroll();
@@ -1377,6 +1398,7 @@ class GameRenderer {
     }
 
     if (model.activeTask) {
+      y += this.drawRandomWordPanel(model.activeTask, y);
       this.drawWoodBoard(20, y, this.width - 40, 300, model.activeTask);
       y += 314;
       this.text(`剩余 ${model.taskTimeLeft}`, 20, y + 10, 12, COLORS.muted, "left", "500");

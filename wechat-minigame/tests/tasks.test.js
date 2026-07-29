@@ -34,3 +34,20 @@ test("draw avoids a recently used task when another task is available", () => {
   assert.notEqual(second.taskId, first.taskId);
   assert.notEqual(second.uid, first.uid);
 });
+
+test("stores the selected daily words on the mission until the next draw", () => {
+  const values = [0.5, 0.85, 0, 0, 0, 0, 0, 0];
+  let index = 0;
+  const task = drawMission({
+    players: players(4),
+    selfId: "p1",
+    random: () => values[index++] ?? 0,
+    now: 1785231000000,
+  });
+
+  assert.equal(task.taskId, "M09");
+  assert.deepEqual(task.randomWords, ["随便", "等一下"]);
+  assert.match(task.description, /随便/);
+  assert.match(task.description, /等一下/);
+  assert.deepEqual(JSON.parse(JSON.stringify(task)).randomWords, task.randomWords);
+});

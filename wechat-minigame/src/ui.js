@@ -28,6 +28,8 @@ const STATUS_LABELS = {
   ended: "旅程结束",
 };
 
+const TOUCH_SLOP = 12;
+
 function getWindowInfo() {
   if (wx.getWindowInfo) return wx.getWindowInfo();
   return wx.getSystemInfoSync();
@@ -76,8 +78,9 @@ class GameRenderer {
       const point = event.touches?.[0];
       if (!point) return;
       const delta = point.clientY - this.touch.startY;
-      if (Math.abs(delta) > 5) this.touch.moved = true;
-      if (this.maxScroll > 0 && this.touch.startY > this.headerHeight && this.touch.startY < this.height - this.navHeight) {
+      const distance = Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y);
+      if (distance > TOUCH_SLOP) this.touch.moved = true;
+      if (this.touch.moved && this.maxScroll > 0 && this.touch.startY > this.headerHeight && this.touch.startY < this.height - this.navHeight) {
         const next = Math.max(0, Math.min(this.maxScroll, this.touch.startScroll - delta));
         this.scrollByScreen[this.model.screen] = next;
         this.render(this.model);
@@ -86,7 +89,7 @@ class GameRenderer {
     wx.onTouchEnd((event) => {
       if (!this.touch) return;
       const point = event.changedTouches?.[0] || this.touch;
-      const moved = this.touch.moved || Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > 8;
+      const moved = this.touch.moved || Math.hypot(point.clientX - this.touch.x, point.clientY - this.touch.y) > TOUCH_SLOP;
       if (!moved) {
         const hit = [...this.hits].reverse().find((item) => (
           point.clientX >= item.x && point.clientX <= item.x + item.width
@@ -342,7 +345,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.0.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -464,6 +467,17 @@ class GameRenderer {
     this.button({ x: this.width - 96, y: y + 80, width: 76, height: 28, label: "确认", action: "approve_claim", payload: claim.id, kind: "primary" });
   }
 
+  drawRandomWordPanel(task, y) {
+    const words = Array.isArray(task.randomWords) ? task.randomWords : [];
+    if (!words.length) return 0;
+    this.panel(20, y, this.width - 40, 66, COLORS.goldSoft, "#ddc38c", 8);
+    this.icon("dice", 42, y + 33, COLORS.gold, 20);
+    this.text("本轮随机词", 60, y + 20, 11, "#71521c", "left", "600");
+    this.text(words.map((word) => `“${word}”`).join("  "), 60, y + 44, 17, COLORS.ink, "left", "700");
+    this.text("随任务锁定", this.width - 34, y + 33, 10, "#846f50", "right", "500");
+    return 76;
+  }
+
   drawMissions(model) {
     this.drawHeader(model, "今日密令");
     const offset = -this.currentScroll();
@@ -477,6 +491,7 @@ class GameRenderer {
     }
 
     if (model.activeTask) {
+      y += this.drawRandomWordPanel(model.activeTask, y);
       this.drawWoodBoard(20, y, this.width - 40, 300, model.activeTask);
       y += 314;
       this.text(`剩余 ${model.taskTimeLeft}`, 20, y + 10, 12, COLORS.muted, "left", "500");

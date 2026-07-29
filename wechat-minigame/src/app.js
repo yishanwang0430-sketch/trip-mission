@@ -319,7 +319,9 @@ class TravelSecretGame {
   }
 
   drawTask() {
-    if (!this.room || this.room.status !== "playing" || this.local.activeTask) return;
+    if (!this.room) return this.showToast("房间尚未同步，请稍后再试");
+    if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
+    if (this.local.activeTask) return this.showToast("请先完成当前密令");
     const model = this.model();
     if (model.remainingDraws <= 0) return this.showToast("今日抽取次数已用完");
     try {

@@ -39,9 +39,10 @@
       session: { roomCode: room.roomCode, playerId: room.self.id, seat: 1, name: "一山" },
       desiredCapacity: 8,
       activeTask: demoMode === "task" ? {
-        uid: "active-1", taskId: "M04", code: "M04-8QJ", score: 2,
+        uid: "active-1", taskId: "M03", code: "M03-8QJ", score: 2,
         targetId: "player-4", targetName: "4号 · 青川",
-        description: "让4号 · 青川先说出你的名字，再问你一个包含“为什么”的问题。",
+        randomWords: ["真的"],
+        description: "让4号 · 青川先向你推荐一道菜、歌或景点，随后自然说出“真的”。",
         drawnAt: Date.now() - 600000, expiresAt: Date.now() + 6600000,
         playedOn: "2026-07-28", revealed: true,
       } : null,
