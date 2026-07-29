@@ -639,7 +639,10 @@ class TravelSecretGame {
       await api.deleteRoom(this.room.roomCode, this.token);
       clearInterval(this.pollTimer);
       this.local.session = null;
-      this.local.activeTask = null;
+      if (this.local.activeTask) {
+        this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
+        this.local.activeTask = null;
+      }
       this.room = null;
       this.screen = "home";
       saveState(this.local);
@@ -657,11 +660,15 @@ class TravelSecretGame {
   }
 
   async leaveLocal() {
-    const accepted = await confirm("退出当前房间？", "只清除本机入口，不会删除房间和排行榜。使用同一台手机重新输入房间号即可回来。", "退出");
+    const taskNotice = this.local.activeTask ? "当前密令会自动放弃，抽取额度仍会按原时间恢复。" : "";
+    const accepted = await confirm("退出当前房间？", `${taskNotice}只清除本机入口，不会删除房间和排行榜。使用同一台手机重新输入房间号即可回来。`, "退出");
     if (!accepted) return;
     clearInterval(this.pollTimer);
     this.local.session = null;
-    this.local.activeTask = null;
+    if (this.local.activeTask) {
+      this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
+      this.local.activeTask = null;
+    }
     this.room = null;
     this.screen = "home";
     this.lastRoomStatus = null;
@@ -1472,7 +1479,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.2.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.2.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
