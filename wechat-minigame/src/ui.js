@@ -125,6 +125,7 @@ class GameRenderer {
     if (model.screen === "home") this.drawHome(model);
     else if (model.screen === "lobby") this.drawLobby(model);
     else if (model.screen === "hidden_editor") this.drawHiddenEditor(model);
+    else if (model.screen === "bounty_editor") this.drawBountyEditor(model);
     else if (model.screen === "missions") this.drawMissions(model);
     else if (model.screen === "ranking") this.drawRanking(model);
     else if (model.screen === "review") this.drawReview(model);
@@ -346,7 +347,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.2.2 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.3.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -403,7 +404,19 @@ class GameRenderer {
     const rows = Math.ceil(room.players.length / 3);
     const actionY = Math.max(this.height - this.safeBottom - 76, routeY + 214 + rows * 86);
     const hidden = room.hiddenTask || { status: "unassigned", isEditor: false };
-    if (hidden.status === "editing" && hidden.isEditor) {
+    const bounty = room.bountyTask || { status: "none", isEditor: false };
+    if (bounty.status === "editing" && bounty.isEditor) {
+      const editorActionY = Math.max(this.height - this.safeBottom - 124, routeY + 214 + rows * 86);
+      this.panel(20, editorActionY - 8, this.width - 40, 116, COLORS.redSoft, "#d7aaa5", 8);
+      this.icon("seal", 44, editorActionY + 18, COLORS.red, 22);
+      this.text(`你是第 ${room.roundNumber} 轮悬赏发布者`, 64, editorActionY + 10, 14, COLORS.ink, "left", "700");
+      this.text("上一轮得分领先，发布者本人也可挑战", 64, editorActionY + 34, 11, COLORS.redDark, "left", "400");
+      this.button({ x: 34, y: editorActionY + 54, width: this.width - 68, height: 44, label: "查看安全约定并发布", action: "open_bounty_editor", icon: "seal" });
+    } else if (bounty.status === "editing") {
+      this.panel(20, actionY, this.width - 40, 66, COLORS.redSoft, "#d7aaa5", 8);
+      this.text(`第 ${room.roundNumber} 轮悬赏设计中`, 36, actionY + 22, 14, COLORS.redDark, "left", "700");
+      this.text("发布后本轮三任务与 5 分悬赏同时开启", 36, actionY + 45, 11, COLORS.muted, "left", "400");
+    } else if (hidden.status === "editing" && hidden.isEditor) {
       const editorActionY = Math.max(this.height - this.safeBottom - 124, routeY + 214 + rows * 86);
       this.panel(20, editorActionY - 8, this.width - 40, 116, COLORS.goldSoft, "#ddc38c", 8);
       this.icon("seal", 44, editorActionY + 18, COLORS.red, 22);
@@ -459,12 +472,47 @@ class GameRenderer {
     this.drawHeader(model, "设计隐藏任务");
   }
 
+  drawBountyEditor(model) {
+    this.drawHeader(model, "发布悬赏任务");
+    let y = this.headerHeight + 18;
+    this.panel(20, y, this.width - 40, 76, COLORS.redSoft, "#d7aaa5", 8);
+    this.icon("seal", 46, y + 38, COLORS.red, 25);
+    this.text(`第 ${model.room.roundNumber} 轮 · 5 分悬赏`, 68, y + 25, 15, COLORS.redDark, "left", "700");
+    this.text("所有人可挑战，首位见证通过者得分", 68, y + 51, 11, COLORS.muted, "left", "400");
+    y += 94;
+
+    this.panel(20, y, this.width - 40, 232, COLORS.paper, COLORS.line, 8);
+    this.text("发布边界", 36, y + 28, 15, COLORS.ink, "left", "700");
+    const rules = [
+      "仅限熟人同行和安全公开场景",
+      "不得涉及危险、酒精、隐私或财物",
+      "不得要求骚扰、偷拍或接触陌生人",
+      "发布者本人也可以完成本条悬赏",
+      "提交前会经过微信内容安全检查",
+    ];
+    rules.forEach((rule, index) => {
+      const rowY = y + 62 + index * 31;
+      this.ctx.beginPath(); this.ctx.arc(40, rowY, 3, 0, Math.PI * 2); this.ctx.fillStyle = COLORS.jade; this.ctx.fill();
+      this.text(rule, 52, rowY, 13, index === 4 ? COLORS.redDark : COLORS.ink, "left", index === 4 ? "600" : "400");
+    });
+    y += 248;
+    this.panel(20, y, this.width - 40, 94, COLORS.blueSoft, "#b8cfdb", 8);
+    this.text("合适示例", 36, y + 24, 12, COLORS.blue, "left", "700");
+    this.wrapText("率先让三位同行一起说出“出发”。", 36, y + 53, this.width - 72, 22, 2, { size: 14, color: COLORS.ink, weight: "500" });
+    y += 110;
+    this.button({ x: 20, y, width: this.width - 40, height: 52, label: "我已理解，填写悬赏", action: "edit_bounty_task", icon: "check" });
+    this.hit("close_bounty_editor", this.width / 2 - 72, y + 62, 144, 38);
+    this.icon("back", this.width / 2 - 50, y + 81, COLORS.muted, 16);
+    this.text("返回同行大厅", this.width / 2 + 8, y + 81, 12, COLORS.muted, "center", "500");
+    this.drawHeader(model, "发布悬赏任务");
+  }
+
   drawScoreStrip(model, y) {
     const self = model.room.players.find((player) => player.id === model.room.self.id);
     const values = [
       ["总分", self?.totalScore || 0],
-      ["今日", model.todayApprovedScore],
-      ["剩余", model.remainingDraws],
+      ["本轮", self?.roundScore || 0],
+      ["未结", model.activeTasks.length],
     ];
     this.panel(20, y, this.width - 40, 72, COLORS.paper, COLORS.line, 8);
     const cell = (this.width - 40) / 3;
@@ -540,27 +588,85 @@ class GameRenderer {
     return 76;
   }
 
+  drawCycleRewardPanel(reward, y) {
+    if (!reward || reward.status === "none") return 0;
+    if (reward.status === "pending" && reward.isWinner) {
+      this.panel(20, y, this.width - 40, 164, COLORS.goldSoft, "#ddc38c", 8);
+      this.icon("seal", 44, y + 31, COLORS.gold, 22);
+      this.text(`第 ${reward.cycleNumber} 个四轮周期冠军`, 64, y + 24, 14, "#71521c", "left", "700");
+      this.text("选择一类，再随机揭晓具体奖励", 64, y + 49, 11, COLORS.muted, "left", "400");
+      this.button({ x: 34, y: y + 78, width: (this.width - 76) / 2, height: 54, label: "恶搞奖励", action: "choose_reward", payload: "prank", kind: "danger" });
+      this.button({ x: this.width / 2 + 4, y: y + 78, width: (this.width - 76) / 2, height: 54, label: "荣誉奖励", action: "choose_reward", payload: "honor", kind: "gold" });
+      return 176;
+    }
+    const height = reward.status === "revealed" ? 112 : 82;
+    this.panel(20, y, this.width - 40, height, COLORS.goldSoft, "#ddc38c", 8);
+    this.text(`四轮冠军 · ${reward.winnerName}`, 36, y + 25, 13, "#71521c", "left", "700");
+    if (reward.status === "revealed") {
+      this.wrapText(reward.resultText, 36, y + 58, this.width - 72, 22, 2, { size: 15, color: COLORS.ink, weight: "600" });
+    } else {
+      this.text("等待冠军完成二选一抽奖", 36, y + 53, 11, COLORS.muted, "left", "400");
+    }
+    return height + 12;
+  }
+
+  drawBountyPanel(bounty, y) {
+    if (!bounty || ["none", "editing"].includes(bounty.status)) return 0;
+    const height = bounty.status === "ready" ? 164 : 124;
+    this.panel(20, y, this.width - 40, height, COLORS.redSoft, "#d7aaa5", 8);
+    this.icon("seal", 43, y + 28, COLORS.red, 22);
+    this.text("全员悬赏 · 5 分", 62, y + 22, 14, COLORS.redDark, "left", "700");
+    const status = bounty.status === "ready" ? "等待首位揭榜" : bounty.status === "pending" ? `${bounty.claimantName} 已揭榜，等待见证` : `${bounty.claimantName} 已获得 5 分`;
+    this.text(status, this.width - 34, y + 22, 11, bounty.status === "claimed" ? COLORS.jadeDark : COLORS.redDark, "right", "600");
+    this.wrapText(bounty.description || "悬赏内容准备中", 36, y + 58, this.width - 72, 21, 3, { size: 14, color: COLORS.ink, weight: "600" });
+    if (bounty.status === "ready") {
+      this.button({ x: 54, y: y + 106, width: this.width - 108, height: 42, label: "我已完成，率先揭榜", action: "claim_bounty", icon: "check" });
+    }
+    return height + 12;
+  }
+
+  drawBatchTaskCard(task, y, model) {
+    const active = task.status === "active";
+    const height = active ? 224 : 112;
+    const final = ["approved", "rejected", "abandoned", "expired"].includes(task.status);
+    const fill = task.isHidden ? COLORS.redSoft : active ? COLORS.paperWarm : COLORS.paper;
+    this.panel(20, y, this.width - 40, height, fill, task.isHidden ? "#d7aaa5" : COLORS.line, 8);
+    this.text(`第 ${task.batchOrder || 1} 条 · ${task.score} 分${task.isHidden ? " · 隐藏" : ""}`, 36, y + 23, 12, task.isHidden ? COLORS.redDark : COLORS.jadeDark, "left", "700");
+    const statusText = active ? `剩余 ${model.timeLeftFor(task.expiresAt)}` : model.statusLabel(task.status);
+    this.text(statusText, this.width - 36, y + 23, 11, active ? COLORS.gold : task.status === "approved" ? COLORS.jade : COLORS.muted, "right", "600");
+    this.wrapText(task.description, 36, y + 57, this.width - 72, 22, active ? 3 : 2, { size: active ? 15 : 13, color: final ? COLORS.muted : COLORS.ink, weight: active ? "600" : "500" });
+    if (final) {
+      this.ctx.beginPath(); this.ctx.moveTo(34, y + 65); this.ctx.lineTo(this.width - 34, y + 65); this.ctx.strokeStyle = "rgba(108,119,118,0.55)"; this.ctx.stroke();
+    }
+    if (active) {
+      const words = Array.isArray(task.randomWords) && task.randomWords.length ? `随机词：${task.randomWords.join(" / ")}` : `目标：${task.targetName}`;
+      this.text(words, 36, y + 139, 11, COLORS.muted, "left", "500");
+      this.button({ x: 34, y: y + 166, width: 88, height: 42, label: "放弃", action: "abandon_task", payload: task.uid, kind: "danger" });
+      this.button({ x: 132, y: y + 166, width: this.width - 166, height: 42, label: "完成并请见证", action: "complete_task", payload: task.uid, icon: "check" });
+    }
+    return height + 10;
+  }
+
   drawMissions(model) {
-    this.drawHeader(model, "今日密令");
+    this.drawHeader(model, `第 ${model.room.roundNumber || 1} 轮密令`);
     const offset = -this.currentScroll();
     let y = this.headerHeight + 16 + offset;
     this.drawScoreStrip(model, y);
     y += 88;
+
+    y += this.drawCycleRewardPanel(model.room.cycleReward, y);
+    y += this.drawBountyPanel(model.room.bountyTask, y);
 
     for (const claim of model.room.pendingApprovals.slice(0, 3)) {
       this.drawApprovalCard(claim, y);
       y += 122;
     }
 
-    if (model.activeTask) {
-      y += this.drawHiddenTaskPanel(model.activeTask, y);
-      y += this.drawRandomWordPanel(model.activeTask, y);
-      this.drawWoodBoard(20, y, this.width - 40, 300, model.activeTask);
-      y += 314;
-      this.text(`剩余 ${model.taskTimeLeft}`, 20, y + 10, 12, COLORS.muted, "left", "500");
-      this.button({ x: 20, y: y + 30, width: 104, height: 48, label: "放弃", action: "abandon_task", kind: "danger", icon: "close" });
-      this.button({ x: 134, y: y + 30, width: this.width - 154, height: 48, label: "完成并请见证", action: "complete_task", icon: "check" });
-      y += 96;
+    if (model.batchTasks.length) {
+      this.text("本轮三条密令", 20, y + 12, 15, COLORS.ink, "left", "700");
+      this.text(`整组剩余 ${model.batchTimeLeft || "0分钟"}`, this.width - 20, y + 12, 11, COLORS.muted, "right", "500");
+      y += 30;
+      for (const task of model.batchTasks) y += this.drawBatchTaskCard(task, y, model);
     } else {
       this.drawEmptyMission(model, y);
       y += 276;
@@ -568,7 +674,7 @@ class GameRenderer {
 
     this.text("最近记录", 20, y + 10, 15, COLORS.ink, "left", "700");
     y += 30;
-    const records = model.history.slice(0, 8);
+    const records = model.history.filter((record) => record.batchId !== model.currentBatchId).slice(0, 8);
     if (!records.length) {
       this.text("还没有任务记录", 20, y + 18, 13, COLORS.muted, "left", "400");
       y += 44;
@@ -583,16 +689,21 @@ class GameRenderer {
     }
     this.maxScroll = Math.max(0, y - offset - (this.height - this.navHeight - 12));
     this.drawNav(model);
-    this.drawHeader(model, "今日密令");
+    this.drawHeader(model, `第 ${model.room.roundNumber || 1} 轮密令`);
   }
 
   drawEmptyMission(model, y) {
     this.panel(20, y, this.width - 40, 250, COLORS.paper, COLORS.line, 8);
-    this.icon("seal", this.width / 2, y + 72, model.remainingDraws ? COLORS.red : COLORS.muted, 52);
-    const title = model.remainingDraws ? "抽取一份私密任务" : "抽取额度已用完";
+    const alreadyDrew = Boolean(model.currentBatchId);
+    const canDraw = model.remainingDraws >= 1 && !alreadyDrew;
+    this.icon("seal", this.width / 2, y + 72, canDraw ? COLORS.red : COLORS.muted, 52);
+    const title = canDraw ? "一次抽取三条私密任务" : alreadyDrew ? "本轮任务已结算" : "正在恢复抽取组数";
     this.text(title, this.width / 2, y + 122, 19, COLORS.ink, "center", "700");
-    this.text(model.remainingDraws ? `还剩 ${model.remainingDraws} 次 · 每次使用后 6 小时恢复` : model.drawRefreshLabel, this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
-    this.button({ x: 54, y: y + 178, width: this.width - 108, height: 50, label: "随机抽取", action: "draw_task", icon: "dice", disabled: model.remainingDraws <= 0 });
+    const help = alreadyDrew
+      ? "等待全员结算后，房主开启下一轮"
+      : canDraw ? "三条同时揭晓，同时开始两小时计时" : `当前 ${model.remainingDraws}/3 组 · ${model.drawRefreshLabel}`;
+    this.text(help, this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
+    this.button({ x: 54, y: y + 178, width: this.width - 108, height: 50, label: "抽取本轮三条密令", action: "draw_task", icon: "dice", disabled: !canDraw });
   }
 
   drawNav(model) {
@@ -626,8 +737,12 @@ class GameRenderer {
     let y = this.headerHeight + 18 + offset;
     this.panel(20, y, this.width - 40, 62, model.room.status === "ended" ? COLORS.goldSoft : COLORS.jadeSoft, null, 8);
     this.text(STATUS_LABELS[model.room.status], 36, y + 22, 12, model.room.status === "ended" ? "#71521c" : COLORS.jadeDark, "left", "600");
-    this.text(`${model.room.players.length} 位同行`, 36, y + 43, 11, COLORS.muted, "left", "400");
-    this.text("得分", this.width - 36, y + 32, 12, COLORS.muted, "right", "500");
+    const presentCount = model.room.players.filter((player) => player.present !== false).length;
+    const roundStatus = model.room.status === "playing"
+      ? `第 ${model.room.roundNumber} 轮 · ${model.room.roundDoneCount || 0}/${presentCount} 人已结算`
+      : `${model.room.players.length} 位同行`;
+    this.text(roundStatus, 36, y + 43, 11, COLORS.muted, "left", "400");
+    this.text("总分 / 本轮", this.width - 36, y + 32, 11, COLORS.muted, "right", "500");
     y += 78;
 
     model.ranking.forEach((player, index) => {
@@ -640,12 +755,15 @@ class GameRenderer {
       this.text(`${player.seat}号 · ${player.name}`, 72, y + height / 2 - 10, 14, COLORS.ink, "left", "600");
       const stateLabel = player.present === false ? "暂离本轮" : player.online ? "在线" : "在场";
       this.text(stateLabel, 72, y + height / 2 + 13, 10, player.present === false ? COLORS.red : player.online ? COLORS.jade : COLORS.muted, "left", "500");
-      this.text(player.totalScore, this.width - 40, y + height / 2, 24, COLORS.ink, "right", "700");
+      this.text(`${player.totalScore} / ${player.roundScore || 0}`, this.width - 40, y + height / 2, 19, COLORS.ink, "right", "700");
       y += height + 8;
     });
 
     if (model.room.self.isOwner && model.room.status === "playing") {
-      this.button({ x: 20, y: y + 8, width: this.width - 40, height: 48, label: "进入今日复盘", action: "enter_review", kind: "secondary", icon: "review" });
+      const reviewLabel = model.room.canAdvanceRound
+        ? `开启第 ${model.room.roundNumber} 轮复盘`
+        : `等待全员结算 · ${model.roundTimeLeft || "即将结束"}`;
+      this.button({ x: 20, y: y + 8, width: this.width - 40, height: 48, label: reviewLabel, action: "enter_review", kind: "secondary", icon: "review", disabled: !model.room.canAdvanceRound });
       y += 68;
     }
     if (model.room.self.isOwner && model.room.status !== "ended") {
@@ -667,15 +785,15 @@ class GameRenderer {
   }
 
   drawReview(model) {
-    this.drawHeader(model, "每日复盘");
+    this.drawHeader(model, "本轮复盘");
     const offset = -this.currentScroll();
     let y = this.headerHeight + 18 + offset;
     if (model.room.status !== "review") {
       this.panel(20, y, this.width - 40, 154, COLORS.paper, COLORS.line, 8);
       this.icon("review", this.width / 2, y + 44, COLORS.blue, 32);
-      this.text("尚未进入复盘", this.width / 2, y + 83, 18, COLORS.ink, "center", "700");
-      this.text("房主可从总榜开启今日复盘", this.width / 2, y + 111, 12, COLORS.muted, "center", "400");
-      if (model.room.self.isOwner) this.button({ x: 54, y: y + 166, width: this.width - 108, height: 48, label: "开启复盘", action: "enter_review", icon: "review" });
+      this.text("尚未进入本轮复盘", this.width / 2, y + 83, 18, COLORS.ink, "center", "700");
+      this.text("全员结算或倒计时结束后，房主可开启", this.width / 2, y + 111, 12, COLORS.muted, "center", "400");
+      if (model.room.self.isOwner) this.button({ x: 54, y: y + 166, width: this.width - 108, height: 48, label: "开启复盘", action: "enter_review", icon: "review", disabled: !model.room.canAdvanceRound });
       y += 232;
     } else {
       this.panel(20, y, this.width - 40, 66, COLORS.blueSoft, "#b8cfdb", 8);
@@ -701,13 +819,13 @@ class GameRenderer {
       if (model.room.self.isOwner) {
         const hasWinner = notes.some((item) => item.isWinner);
         this.button({ x: 20, y: y + 6, width: this.width - 40, height: 48, label: hasWinner ? "今日最佳已选" : "选择今日最佳", action: "award_review", kind: "gold", icon: "seal", disabled: hasWinner || !notes.length });
-        this.button({ x: 20, y: y + 64, width: this.width - 40, height: 48, label: "完成复盘，继续旅程", action: "resume_room", icon: "check" });
+        this.button({ x: 20, y: y + 64, width: this.width - 40, height: 48, label: `完成复盘，开启第 ${model.room.roundNumber + 1} 轮`, action: "resume_room", icon: "check" });
         y += 130;
       }
     }
     this.maxScroll = Math.max(0, y - offset - (this.height - this.navHeight - 12));
     this.drawNav(model);
-    this.drawHeader(model, "每日复盘");
+    this.drawHeader(model, "本轮复盘");
   }
 
   drawPicker(picker) {

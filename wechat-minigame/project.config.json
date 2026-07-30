@@ -1,6 +1,7 @@
 {
   "appid": "wx1ff4c15692a4e10f",
   "compileType": "game",
+  "cloudfunctionRoot": "cloudfunctions/",
   "libVersion": "3.7.12",
   "miniprogramRoot": "./",
   "projectname": "游侠密令-微信小游戏",

@@ -1,5 +1,6 @@
 const api = require("./api");
 const config = require("./config");
+const { checkText } = require("./content-security");
 const { dateKey, drawMission } = require("./tasks");
 const { deviceToken, loadState, saveState } = require("./storage");
 const { GameRenderer } = require("./ui");
@@ -35,7 +36,18 @@ function validateHiddenTask(value) {
   return { value: description, error: "" };
 }
 
-function buildHiddenMission(task, now = Date.now()) {
+function validateBountyTask(value) {
+  const description = String(value || "").trim().replace(/\s+/g, " ");
+  if (Array.from(description).length < 8 || Array.from(description).length > 100 || /[\u0000-\u001f\u007f]/.test(description)) {
+    return { value: null, error: "请填写 8–100 个字符的完整悬赏任务" };
+  }
+  if (HIDDEN_TASK_FORBIDDEN.test(description)) {
+    return { value: null, error: "内容涉及安全、隐私或他人边界，请重新设计" };
+  }
+  return { value: description, error: "" };
+}
+
+function buildHiddenMission(task, now = Date.now(), roundNumber = 1, batchId = null) {
   if (!task?.uid || task.taskId !== "X01" || task.score !== 3 || !task.description) {
     throw new Error("隐藏任务数据无效，请稍后重试");
   }
@@ -52,8 +64,34 @@ function buildHiddenMission(task, now = Date.now()) {
     drawnAt: now,
     expiresAt: now + config.taskExpiryMs,
     playedOn: dateKey(new Date(now)),
-    revealed: false,
+    roundNumber,
+    batchId,
+    revealed: true,
   };
+}
+
+function buildMissionBatch({ players, selfId, history = [], hiddenMission = null, roundNumber = 1, now = Date.now(), random = Math.random }) {
+  const batchId = `batch-${roundNumber}-${now.toString(36)}`;
+  const missions = hiddenMission ? [{ ...hiddenMission }] : [];
+  while (missions.length < config.batchSize) {
+    missions.push(drawMission({
+      players,
+      selfId,
+      history: [...history, ...missions],
+      random,
+      now: now + missions.length,
+    }));
+  }
+  return missions.map((mission, index) => ({
+    ...mission,
+    batchId,
+    batchOrder: index + 1,
+    roundNumber,
+    drawnAt: now,
+    expiresAt: now + config.taskExpiryMs,
+    playedOn: dateKey(new Date(now)),
+    revealed: true,
+  }));
 }
 
 function formatReviewDate(key) {
@@ -74,14 +112,14 @@ function timeUntil(timestamp, now = Date.now()) {
   return `${totalMinutes}分钟`;
 }
 
-function drawAvailability({ history = [], activeTask = null, now = Date.now(), limit = config.drawLimit, refreshMs = config.drawRefreshMs } = {}) {
-  const records = [...history, activeTask].filter(Boolean);
+function drawAvailability({ history = [], activeTasks = [], activeTask = null, now = Date.now(), limit = config.drawLimit, refreshMs = config.drawRefreshMs } = {}) {
+  const records = [...history, ...activeTasks, activeTask].filter(Boolean);
   const seen = new Set();
   const recentDraws = records
-    .map((record) => ({ uid: record.uid, drawnAt: Number(record.drawnAt) }))
-    .filter(({ uid, drawnAt }) => {
-      if (!Number.isFinite(drawnAt) || drawnAt > now || drawnAt <= now - refreshMs || (uid && seen.has(uid))) return false;
-      if (uid) seen.add(uid);
+    .map((record) => ({ key: record.batchId || record.uid, drawnAt: Number(record.drawnAt) }))
+    .filter(({ key, drawnAt }) => {
+      if (!Number.isFinite(drawnAt) || drawnAt > now || drawnAt <= now - refreshMs || (key && seen.has(key))) return false;
+      if (key) seen.add(key);
       return true;
     })
     .map(({ drawnAt }) => drawnAt)
@@ -151,14 +189,14 @@ class TravelSecretGame {
     this.render();
     if (this.local.session) this.refreshRoom();
     this.clockTimer = setInterval(() => {
-      this.expireTaskIfNeeded();
+      this.expireTasksIfNeeded();
       this.render();
     }, 30000);
   }
 
   model() {
     const today = dateKey();
-    const drawState = drawAvailability({ history: this.local.history, activeTask: this.local.activeTask });
+    const drawState = drawAvailability({ history: this.local.history, activeTasks: this.local.activeTasks });
     const todayApprovedScore = this.local.history
       .filter((record) => record.playedOn === today && record.status === "approved")
       .reduce((sum, record) => sum + record.score, 0);
@@ -172,23 +210,32 @@ class TravelSecretGame {
     };
     const ranking = [...room.players].sort((a, b) => b.totalScore - a.totalScore || a.seat - b.seat);
     const myReview = room.reviews.find((review) => review.playerId === room.self.id);
+    const batchHistory = this.local.currentBatchId
+      ? this.local.history.filter((record) => record.batchId === this.local.currentBatchId)
+      : [];
+    const batchTasks = [...this.local.activeTasks.map((task) => ({ ...task, status: "active" })), ...batchHistory]
+      .sort((a, b) => (a.batchOrder || 0) - (b.batchOrder || 0));
     return {
       screen: this.screen,
       desiredCapacity: this.local.desiredCapacity,
       inviteCode: this.inviteCode,
       room: this.room,
-      activeTask: this.local.activeTask,
+      activeTasks: this.local.activeTasks,
+      currentBatchId: this.local.currentBatchId,
+      batchTasks,
       history: [...this.local.history].reverse(),
       ranking,
       remainingDraws: drawState.remaining,
       drawRefreshLabel: drawState.nextRefreshAt ? `约 ${timeLeft(drawState.nextRefreshAt)} 后恢复` : "每次使用后 6 小时恢复",
       todayApprovedScore,
-      taskTimeLeft: this.local.activeTask ? timeLeft(this.local.activeTask.expiresAt) : "",
+      batchTimeLeft: batchTasks.length ? timeLeft(batchTasks[0].expiresAt) : "",
+      roundTimeLeft: room.roundDeadline ? timeLeft(new Date(room.roundDeadline).getTime()) : "",
       reviewDateLabel: formatReviewDate(room.currentReviewOn),
       myReview,
       busy: this.busy,
       toast: this.toast,
       overlayPicker: this.overlayPicker,
+      timeLeftFor: (timestamp) => timeLeft(timestamp),
       statusLabel: (status) => RECORD_STATUS[status] || status,
     };
   }
@@ -230,7 +277,13 @@ class TravelSecretGame {
   setRoom(room, preferredScreen = null) {
     if (!room?.roomCode || !room?.self) throw new Error("房间数据无效");
     const oldStatus = this.lastRoomStatus;
+    if (this.local.currentRound && room.roundNumber && room.roundNumber !== this.local.currentRound) {
+      this.archiveActiveTasks("expired");
+      this.local.currentBatchId = null;
+    }
+    if (oldStatus === "playing" && room.status === "review") this.archiveActiveTasks("expired");
     this.room = room;
+    if (room.roundNumber) this.local.currentRound = room.roundNumber;
     this.lastRoomStatus = room.status;
     this.local.session = {
       roomCode: room.roomCode,
@@ -243,12 +296,14 @@ class TravelSecretGame {
     saveState(this.local);
 
     if (preferredScreen) this.screen = preferredScreen;
-    else if (room.status === "lobby" && this.screen !== "hidden_editor") this.screen = "lobby";
+    else if (room.status === "lobby" && room.bountyTask?.isEditor && room.bountyTask?.needsSubmission) this.screen = "bounty_editor";
+    else if (room.status === "lobby" && !["hidden_editor", "bounty_editor"].includes(this.screen)) this.screen = "lobby";
     else if (room.status === "review" && oldStatus !== "review") this.screen = "review";
     else if (room.status === "ended") this.screen = "ranking";
-    else if (room.status === "playing" && ["home", "lobby", "hidden_editor"].includes(this.screen)) this.screen = "missions";
+    else if (room.status === "playing" && ["home", "lobby", "hidden_editor", "bounty_editor"].includes(this.screen)) this.screen = "missions";
     this.startPolling();
     this.render();
+    if (room.status === "playing") this.markRoundCompleteIfReady();
   }
 
   syncClaimStatuses() {
@@ -262,7 +317,33 @@ class TravelSecretGame {
         changed = true;
       }
     }
-    if (changed) saveState(this.local);
+    if (changed) {
+      saveState(this.local);
+      this.markRoundCompleteIfReady();
+    }
+  }
+
+  async markRoundCompleteIfReady() {
+    if (!this.room?.roundNumber || this.room.status !== "playing") return;
+    const roundNumber = this.room.roundNumber;
+    if (this.local.completedRounds.includes(roundNumber)) return;
+    if (this.local.activeTasks.some((task) => task.roundNumber === roundNumber)) return;
+    const batchRecords = this.local.history.filter((record) => (
+      record.roundNumber === roundNumber && record.batchId === this.local.currentBatchId
+    ));
+    if (batchRecords.length < config.batchSize) return;
+    if (batchRecords.some((record) => ["submit_pending", "sync_error", "pending"].includes(record.status))) return;
+
+    this.local.completedRounds.push(roundNumber);
+    saveState(this.local);
+    try {
+      const room = await api.completeRound(this.room.roomCode, this.token);
+      this.setRoom(room);
+      this.showToast(`第 ${roundNumber} 轮任务已全部结算`);
+    } catch (_) {
+      this.local.completedRounds = this.local.completedRounds.filter((item) => item !== roundNumber);
+      saveState(this.local);
+    }
   }
 
   startPolling() {
@@ -301,13 +382,25 @@ class TravelSecretGame {
     if (pending.length) saveState(this.local);
   }
 
-  expireTaskIfNeeded() {
-    const task = this.local.activeTask;
-    if (!task || task.expiresAt > Date.now()) return;
-    this.local.history.push({ ...task, status: "expired", resolvedAt: Date.now() });
-    this.local.activeTask = null;
+  archiveActiveTasks(status = "abandoned") {
+    if (!this.local.activeTasks.length) return 0;
+    const resolvedAt = Date.now();
+    this.local.history.push(...this.local.activeTasks.map((task) => ({ ...task, status, resolvedAt })));
+    const count = this.local.activeTasks.length;
+    this.local.activeTasks = [];
+    return count;
+  }
+
+  expireTasksIfNeeded() {
+    const now = Date.now();
+    const expired = this.local.activeTasks.filter((task) => task.expiresAt <= now);
+    if (!expired.length) return;
+    const expiredIds = new Set(expired.map((task) => task.uid));
+    this.local.history.push(...expired.map((task) => ({ ...task, status: "expired", resolvedAt: now })));
+    this.local.activeTasks = this.local.activeTasks.filter((task) => !expiredIds.has(task.uid));
     saveState(this.local);
-    this.showToast("密令已超时，计为 0 分");
+    this.showToast(`${expired.length} 条密令已超时，计为 0 分`);
+    this.markRoundCompleteIfReady();
   }
 
   sharePayload() {
@@ -329,6 +422,10 @@ class TravelSecretGame {
     if (entered === null) return null;
     const name = normalizePlayerName(entered);
     if (!name) this.showToast("请输入 1–12 个字符的昵称");
+    if (name) {
+      try { await checkText(name, 1); }
+      catch (error) { this.showToast(error.message); return null; }
+    }
     return name;
   }
 
@@ -408,6 +505,8 @@ class TravelSecretGame {
     if (entered === null) return;
     const checked = validateHiddenTask(entered);
     if (!checked.value) return this.showToast(checked.error);
+    try { await checkText(checked.value, 2); }
+    catch (error) { return this.showToast(error.message); }
     const accepted = await confirm(
       "确认提交隐藏任务？",
       `${checked.value}\n\n提交后不可修改；设计者本人不会抽到。`,
@@ -421,67 +520,116 @@ class TravelSecretGame {
     });
   }
 
+  openBountyEditor() {
+    if (!this.room?.bountyTask?.isEditor || !this.room.bountyTask.needsSubmission) {
+      return this.showToast("你不是本轮悬赏发布者");
+    }
+    this.screen = "bounty_editor";
+    this.renderer.resetScroll("bounty_editor");
+    this.render();
+  }
+
+  closeBountyEditor() {
+    this.screen = "lobby";
+    this.renderer.resetScroll("lobby");
+    this.render();
+  }
+
+  async editBountyTask() {
+    if (!this.room?.bountyTask?.isEditor || !this.room.bountyTask.needsSubmission) {
+      return this.showToast("悬赏任务已经锁定");
+    }
+    const entered = await promptText(
+      "发布 5 分悬赏",
+      "8–100 字，例如：率先让三位同行一起说出“出发”",
+    );
+    if (entered === null) return;
+    const checked = validateBountyTask(entered);
+    if (!checked.value) return this.showToast(checked.error);
+    try { await checkText(checked.value, 2); }
+    catch (error) { return this.showToast(error.message); }
+    const accepted = await confirm(
+      "确认发布悬赏？",
+      `${checked.value}\n\n所有同行都可以挑战，包括你本人；首位通过见证者获得 5 分。`,
+      "确认发布",
+    );
+    if (!accepted) return;
+    await this.runBusy(async () => {
+      const room = await api.submitBountyTask(this.room.roomCode, this.token, checked.value);
+      this.setRoom(room, "missions");
+      this.showToast(`第 ${room.roundNumber} 轮开始，5 分悬赏已发布`);
+    });
+  }
+
   async drawTask() {
     if (!this.room) return this.showToast("房间尚未同步，请稍后再试");
     if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
-    if (this.local.activeTask) return this.showToast("请先完成当前密令");
+    if (this.local.activeTasks.length) return this.showToast("请先处理本轮已抽取的三条密令");
+    if (this.local.currentBatchId && this.local.currentRound === this.room.roundNumber) {
+      return this.showToast("本轮已经抽取过，请等待下一轮");
+    }
     const model = this.model();
-    if (model.remainingDraws <= 0) return this.showToast(`抽取额度已用完，${model.drawRefreshLabel}`);
-    try {
+    if (model.remainingDraws < 1) return this.showToast(`抽取组数已用完，${model.drawRefreshLabel}`);
+    await this.runBusy(async () => {
       const presentPlayers = this.room.players.filter((player) => player.present !== false);
       if (!presentPlayers.some((player) => player.id === this.room.self.id)) {
         return this.showToast("请先在房间菜单中重新归队");
       }
+      const now = Date.now();
+      let hiddenMission = null;
       const hidden = this.room.hiddenTask;
       const hiddenAlreadyKnown = hidden?.taskUid && (
-        this.local.activeTask?.uid === hidden.taskUid
+        this.local.activeTasks.some((task) => task.uid === hidden.taskUid)
         || this.local.history.some((record) => record.uid === hidden.taskUid)
       );
       if (hidden?.availableForSelf && hidden.taskUid && !hiddenAlreadyKnown) {
-        await this.runBusy(async () => {
-          const result = await api.takeHiddenTask(this.room.roomCode, this.token);
-          this.local.activeTask = buildHiddenMission(result.task);
-          saveState(this.local);
-          this.setRoom(result.room, "missions");
-          this.showToast("你抽中了本轮唯一的隐藏任务");
-        });
-        return;
+        const result = await api.takeHiddenTask(this.room.roomCode, this.token);
+        hiddenMission = buildHiddenMission(result.task, now, this.room.roundNumber || 1);
+        this.setRoom(result.room, "missions");
       }
-      this.local.activeTask = drawMission({
+      const batch = buildMissionBatch({
         players: presentPlayers,
         selfId: this.room.self.id,
         history: this.local.history,
+        hiddenMission,
+        roundNumber: this.room.roundNumber || 1,
+        now,
       });
-      this.persist();
-    } catch (error) {
-      this.showToast(error.message);
-    }
+      this.local.activeTasks = batch;
+      this.local.currentBatchId = batch[0].batchId;
+      this.local.currentRound = this.room.roundNumber || 1;
+      saveState(this.local);
+      this.render();
+      this.showToast(hiddenMission ? "三条密令已揭晓，其中包含本房隐藏任务" : "三条密令已同时揭晓，计时开始");
+    });
   }
 
-  toggleTask() {
-    if (!this.local.activeTask) return;
-    this.local.activeTask.revealed = !this.local.activeTask.revealed;
+  toggleTask(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task) return;
+    task.revealed = !task.revealed;
     this.persist();
   }
 
-  openWitnessPicker() {
-    if (!this.local.activeTask || !this.room) return;
+  openWitnessPicker(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task || !this.room) return;
     const options = this.room.players
       .filter((player) => player.id !== this.room.self.id)
       .map((player) => ({
         label: `${player.seat}号 · ${player.name}${player.online ? "" : "（暂离）"}`,
         value: player.id,
       }));
-    this.overlayPicker = { type: "witness", title: "谁来见证这次密令？", options, help: "对方将在自己的手机上确认" };
+    this.overlayPicker = { type: "witness", taskUid, title: "谁来见证这次密令？", options, help: "对方将在自己的手机上确认" };
     this.render();
   }
 
-  async completeTask(witnessId) {
-    const task = this.local.activeTask;
+  async completeTask(taskUid, witnessId) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
     if (!task) return;
     const record = { ...task, revealed: true, status: "submit_pending", witnessId, resolvedAt: Date.now() };
     this.local.history.push(record);
-    this.local.activeTask = null;
+    this.local.activeTasks = this.local.activeTasks.filter((item) => item.uid !== task.uid);
     this.overlayPicker = null;
     saveState(this.local);
     this.render();
@@ -499,13 +647,15 @@ class TravelSecretGame {
     });
   }
 
-  async abandonTask() {
-    if (!this.local.activeTask) return;
-    const accepted = await confirm("放弃当前密令？", "这次抽取仍会计入今日次数，并记为 0 分。", "放弃");
+  async abandonTask(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task) return;
+    const accepted = await confirm("放弃这条密令？", "本条会记为 0 分，其余两条不受影响。", "放弃");
     if (!accepted) return;
-    this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-    this.local.activeTask = null;
+    this.local.history.push({ ...task, status: "abandoned", resolvedAt: Date.now() });
+    this.local.activeTasks = this.local.activeTasks.filter((item) => item.uid !== task.uid);
     this.persist();
+    this.markRoundCompleteIfReady();
   }
 
   async resolveClaim(claimId, approved) {
@@ -522,7 +672,37 @@ class TravelSecretGame {
     });
   }
 
+  openBountyWitnessPicker() {
+    if (!this.room?.bountyTask?.availableToClaim) return this.showToast("悬赏已经被其他同行揭榜");
+    const options = this.room.players
+      .filter((player) => player.id !== this.room.self.id)
+      .map((player) => ({
+        label: `${player.seat}号 · ${player.name}${player.online ? "" : "（暂离）"}`,
+        value: player.id,
+      }));
+    this.overlayPicker = { type: "bounty_witness", title: "谁来见证悬赏完成？", options, help: "最先提交者锁定揭榜资格，见证通过后获得 5 分" };
+    this.render();
+  }
+
+  async claimBounty(witnessId) {
+    this.overlayPicker = null;
+    await this.runBusy(async () => {
+      const room = await api.claimBounty(this.room.roomCode, this.token, witnessId);
+      this.setRoom(room, "missions");
+      this.showToast("已率先揭榜，等待见证后获得 5 分");
+    });
+  }
+
+  async chooseCycleReward(category) {
+    await this.runBusy(async () => {
+      const room = await api.chooseCycleReward(this.room.roomCode, this.token, category);
+      this.setRoom(room, this.screen);
+      this.showToast("四轮奖励已揭晓");
+    });
+  }
+
   async enterReview() {
+    if (!this.room?.canAdvanceRound) return this.showToast("需等待全员任务结算，或等待本轮倒计时结束");
     await this.runBusy(async () => {
       const room = await api.setRoomStatus(this.room.roomCode, this.token, "review", dateKey());
       this.setRoom(room, "review");
@@ -571,9 +751,9 @@ class TravelSecretGame {
 
   async resumeRoom() {
     await this.runBusy(async () => {
-      const room = await api.setRoomStatus(this.room.roomCode, this.token, "playing");
-      this.setRoom(room, "missions");
-      this.showToast("复盘完成，旅程继续");
+      const room = await api.startNextRound(this.room.roomCode, this.token);
+      this.setRoom(room, room.bountyTask?.isEditor ? "bounty_editor" : "lobby");
+      this.showToast(`第 ${room.roundNumber} 轮悬赏发布者已选出`);
     });
   }
 
@@ -629,10 +809,7 @@ class TravelSecretGame {
       await api.deleteRoom(this.room.roomCode, this.token);
       clearInterval(this.pollTimer);
       this.local.session = null;
-      if (this.local.activeTask) {
-        this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-        this.local.activeTask = null;
-      }
+      this.archiveActiveTasks("abandoned");
       this.room = null;
       this.screen = "home";
       saveState(this.local);
@@ -643,22 +820,19 @@ class TravelSecretGame {
   showRules() {
     wx.showModal({
       title: "游侠密令规则",
-      content: "最多保留 3 个抽取额度，每次使用后 6 小时恢复；每条密令限时 2 小时。每个新房间会随机选出一名隐藏任务设计者，任务仅由另一名玩家抽到。完成后指定同行见证。不要执行危险、冒犯、违法、涉及隐私财物或影响陌生人的任务；任何人不舒服都应立即停止。",
+      content: "每轮一次抽取 3 条密令，全部立即揭晓并同时计时 2 小时，可按任意顺序完成并分别指定见证。复盘后，上轮最高分者发布下一轮 5 分悬赏；每 4 轮冠军可在恶搞奖励和荣誉奖励中二选一抽取。所有自定义文字均需通过平台内容安全检查。任何人不舒服都应立即停止。",
       showCancel: false,
       confirmText: "明白",
     });
   }
 
   async leaveLocal() {
-    const taskNotice = this.local.activeTask ? "当前密令会自动放弃，抽取额度仍会按原时间恢复。" : "";
+    const taskNotice = this.local.activeTasks.length ? "尚未结算的密令会自动放弃，抽取额度仍会按原时间恢复。" : "";
     const accepted = await confirm("退出当前房间？", `${taskNotice}只清除本机入口，不会删除房间和排行榜。使用同一台手机重新输入房间号即可回来。`, "退出");
     if (!accepted) return;
     clearInterval(this.pollTimer);
     this.local.session = null;
-    if (this.local.activeTask) {
-      this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-      this.local.activeTask = null;
-    }
+    this.archiveActiveTasks("abandoned");
     this.room = null;
     this.screen = "home";
     this.lastRoomStatus = null;
@@ -686,11 +860,16 @@ class TravelSecretGame {
       open_hidden_editor: () => this.openHiddenEditor(),
       close_hidden_editor: () => this.closeHiddenEditor(),
       edit_hidden_task: () => this.editHiddenTask(),
+      open_bounty_editor: () => this.openBountyEditor(),
+      close_bounty_editor: () => this.closeBountyEditor(),
+      edit_bounty_task: () => this.editBountyTask(),
       room_menu: () => this.roomMenu(),
       draw_task: () => this.drawTask(),
-      toggle_task: () => this.toggleTask(),
-      complete_task: () => this.openWitnessPicker(),
-      abandon_task: () => this.abandonTask(),
+      toggle_task: () => this.toggleTask(payload),
+      complete_task: () => this.openWitnessPicker(payload),
+      abandon_task: () => this.abandonTask(payload),
+      claim_bounty: () => this.openBountyWitnessPicker(),
+      choose_reward: () => this.chooseCycleReward(payload),
       approve_claim: () => this.resolveClaim(payload, true),
       reject_claim: () => this.resolveClaim(payload, false),
       navigate: () => this.navigate(payload),
@@ -703,7 +882,8 @@ class TravelSecretGame {
       leave_local: () => this.leaveLocal(),
       close_picker: () => { this.overlayPicker = null; this.render(); },
       picker_select: () => {
-        if (this.overlayPicker?.type === "witness") this.completeTask(payload);
+        if (this.overlayPicker?.type === "witness") this.completeTask(this.overlayPicker.taskUid, payload);
+        else if (this.overlayPicker?.type === "bounty_witness") this.claimBounty(payload);
         else if (this.overlayPicker?.type === "award") this.awardReview(payload);
         else if (this.overlayPicker?.type === "review") this.saveReviewPreset(payload);
       },
@@ -718,7 +898,9 @@ module.exports = {
   REVIEW_PRESETS,
   normalizePlayerName,
   validateHiddenTask,
+  validateBountyTask,
   buildHiddenMission,
+  buildMissionBatch,
   formatReviewDate,
   timeLeft,
   timeUntil,

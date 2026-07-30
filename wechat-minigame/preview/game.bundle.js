@@ -2,17 +2,19 @@
 const modules={0: function(module, exports, __require) {
 const { TravelSecretGame } = __require(1);
 
+wx.cloud?.init({ traceUser: true });
+
 const game = new TravelSecretGame();
 game.start();
-
 
 },
 1: function(module, exports, __require) {
 const api = __require(2);
 const config = __require(3);
-const { dateKey, drawMission } = __require(4);
-const { deviceToken, loadState, saveState } = __require(5);
-const { GameRenderer } = __require(6);
+const { checkText } = __require(4);
+const { dateKey, drawMission } = __require(5);
+const { deviceToken, loadState, saveState } = __require(6);
+const { GameRenderer } = __require(7);
 
 const RECORD_STATUS = {
   submit_pending: "待上传",
@@ -45,7 +47,18 @@ function validateHiddenTask(value) {
   return { value: description, error: "" };
 }
 
-function buildHiddenMission(task, now = Date.now()) {
+function validateBountyTask(value) {
+  const description = String(value || "").trim().replace(/\s+/g, " ");
+  if (Array.from(description).length < 8 || Array.from(description).length > 100 || /[\u0000-\u001f\u007f]/.test(description)) {
+    return { value: null, error: "请填写 8–100 个字符的完整悬赏任务" };
+  }
+  if (HIDDEN_TASK_FORBIDDEN.test(description)) {
+    return { value: null, error: "内容涉及安全、隐私或他人边界，请重新设计" };
+  }
+  return { value: description, error: "" };
+}
+
+function buildHiddenMission(task, now = Date.now(), roundNumber = 1, batchId = null) {
   if (!task?.uid || task.taskId !== "X01" || task.score !== 3 || !task.description) {
     throw new Error("隐藏任务数据无效，请稍后重试");
   }
@@ -62,8 +75,34 @@ function buildHiddenMission(task, now = Date.now()) {
     drawnAt: now,
     expiresAt: now + config.taskExpiryMs,
     playedOn: dateKey(new Date(now)),
-    revealed: false,
+    roundNumber,
+    batchId,
+    revealed: true,
   };
+}
+
+function buildMissionBatch({ players, selfId, history = [], hiddenMission = null, roundNumber = 1, now = Date.now(), random = Math.random }) {
+  const batchId = `batch-${roundNumber}-${now.toString(36)}`;
+  const missions = hiddenMission ? [{ ...hiddenMission }] : [];
+  while (missions.length < config.batchSize) {
+    missions.push(drawMission({
+      players,
+      selfId,
+      history: [...history, ...missions],
+      random,
+      now: now + missions.length,
+    }));
+  }
+  return missions.map((mission, index) => ({
+    ...mission,
+    batchId,
+    batchOrder: index + 1,
+    roundNumber,
+    drawnAt: now,
+    expiresAt: now + config.taskExpiryMs,
+    playedOn: dateKey(new Date(now)),
+    revealed: true,
+  }));
 }
 
 function formatReviewDate(key) {
@@ -84,14 +123,14 @@ function timeUntil(timestamp, now = Date.now()) {
   return `${totalMinutes}分钟`;
 }
 
-function drawAvailability({ history = [], activeTask = null, now = Date.now(), limit = config.drawLimit, refreshMs = config.drawRefreshMs } = {}) {
-  const records = [...history, activeTask].filter(Boolean);
+function drawAvailability({ history = [], activeTasks = [], activeTask = null, now = Date.now(), limit = config.drawLimit, refreshMs = config.drawRefreshMs } = {}) {
+  const records = [...history, ...activeTasks, activeTask].filter(Boolean);
   const seen = new Set();
   const recentDraws = records
-    .map((record) => ({ uid: record.uid, drawnAt: Number(record.drawnAt) }))
-    .filter(({ uid, drawnAt }) => {
-      if (!Number.isFinite(drawnAt) || drawnAt > now || drawnAt <= now - refreshMs || (uid && seen.has(uid))) return false;
-      if (uid) seen.add(uid);
+    .map((record) => ({ key: record.batchId || record.uid, drawnAt: Number(record.drawnAt) }))
+    .filter(({ key, drawnAt }) => {
+      if (!Number.isFinite(drawnAt) || drawnAt > now || drawnAt <= now - refreshMs || (key && seen.has(key))) return false;
+      if (key) seen.add(key);
       return true;
     })
     .map(({ drawnAt }) => drawnAt)
@@ -161,14 +200,14 @@ class TravelSecretGame {
     this.render();
     if (this.local.session) this.refreshRoom();
     this.clockTimer = setInterval(() => {
-      this.expireTaskIfNeeded();
+      this.expireTasksIfNeeded();
       this.render();
     }, 30000);
   }
 
   model() {
     const today = dateKey();
-    const drawState = drawAvailability({ history: this.local.history, activeTask: this.local.activeTask });
+    const drawState = drawAvailability({ history: this.local.history, activeTasks: this.local.activeTasks });
     const todayApprovedScore = this.local.history
       .filter((record) => record.playedOn === today && record.status === "approved")
       .reduce((sum, record) => sum + record.score, 0);
@@ -182,23 +221,32 @@ class TravelSecretGame {
     };
     const ranking = [...room.players].sort((a, b) => b.totalScore - a.totalScore || a.seat - b.seat);
     const myReview = room.reviews.find((review) => review.playerId === room.self.id);
+    const batchHistory = this.local.currentBatchId
+      ? this.local.history.filter((record) => record.batchId === this.local.currentBatchId)
+      : [];
+    const batchTasks = [...this.local.activeTasks.map((task) => ({ ...task, status: "active" })), ...batchHistory]
+      .sort((a, b) => (a.batchOrder || 0) - (b.batchOrder || 0));
     return {
       screen: this.screen,
       desiredCapacity: this.local.desiredCapacity,
       inviteCode: this.inviteCode,
       room: this.room,
-      activeTask: this.local.activeTask,
+      activeTasks: this.local.activeTasks,
+      currentBatchId: this.local.currentBatchId,
+      batchTasks,
       history: [...this.local.history].reverse(),
       ranking,
       remainingDraws: drawState.remaining,
       drawRefreshLabel: drawState.nextRefreshAt ? `约 ${timeLeft(drawState.nextRefreshAt)} 后恢复` : "每次使用后 6 小时恢复",
       todayApprovedScore,
-      taskTimeLeft: this.local.activeTask ? timeLeft(this.local.activeTask.expiresAt) : "",
+      batchTimeLeft: batchTasks.length ? timeLeft(batchTasks[0].expiresAt) : "",
+      roundTimeLeft: room.roundDeadline ? timeLeft(new Date(room.roundDeadline).getTime()) : "",
       reviewDateLabel: formatReviewDate(room.currentReviewOn),
       myReview,
       busy: this.busy,
       toast: this.toast,
       overlayPicker: this.overlayPicker,
+      timeLeftFor: (timestamp) => timeLeft(timestamp),
       statusLabel: (status) => RECORD_STATUS[status] || status,
     };
   }
@@ -240,7 +288,13 @@ class TravelSecretGame {
   setRoom(room, preferredScreen = null) {
     if (!room?.roomCode || !room?.self) throw new Error("房间数据无效");
     const oldStatus = this.lastRoomStatus;
+    if (this.local.currentRound && room.roundNumber && room.roundNumber !== this.local.currentRound) {
+      this.archiveActiveTasks("expired");
+      this.local.currentBatchId = null;
+    }
+    if (oldStatus === "playing" && room.status === "review") this.archiveActiveTasks("expired");
     this.room = room;
+    if (room.roundNumber) this.local.currentRound = room.roundNumber;
     this.lastRoomStatus = room.status;
     this.local.session = {
       roomCode: room.roomCode,
@@ -253,12 +307,14 @@ class TravelSecretGame {
     saveState(this.local);
 
     if (preferredScreen) this.screen = preferredScreen;
-    else if (room.status === "lobby" && this.screen !== "hidden_editor") this.screen = "lobby";
+    else if (room.status === "lobby" && room.bountyTask?.isEditor && room.bountyTask?.needsSubmission) this.screen = "bounty_editor";
+    else if (room.status === "lobby" && !["hidden_editor", "bounty_editor"].includes(this.screen)) this.screen = "lobby";
     else if (room.status === "review" && oldStatus !== "review") this.screen = "review";
     else if (room.status === "ended") this.screen = "ranking";
-    else if (room.status === "playing" && ["home", "lobby", "hidden_editor"].includes(this.screen)) this.screen = "missions";
+    else if (room.status === "playing" && ["home", "lobby", "hidden_editor", "bounty_editor"].includes(this.screen)) this.screen = "missions";
     this.startPolling();
     this.render();
+    if (room.status === "playing") this.markRoundCompleteIfReady();
   }
 
   syncClaimStatuses() {
@@ -272,7 +328,33 @@ class TravelSecretGame {
         changed = true;
       }
     }
-    if (changed) saveState(this.local);
+    if (changed) {
+      saveState(this.local);
+      this.markRoundCompleteIfReady();
+    }
+  }
+
+  async markRoundCompleteIfReady() {
+    if (!this.room?.roundNumber || this.room.status !== "playing") return;
+    const roundNumber = this.room.roundNumber;
+    if (this.local.completedRounds.includes(roundNumber)) return;
+    if (this.local.activeTasks.some((task) => task.roundNumber === roundNumber)) return;
+    const batchRecords = this.local.history.filter((record) => (
+      record.roundNumber === roundNumber && record.batchId === this.local.currentBatchId
+    ));
+    if (batchRecords.length < config.batchSize) return;
+    if (batchRecords.some((record) => ["submit_pending", "sync_error", "pending"].includes(record.status))) return;
+
+    this.local.completedRounds.push(roundNumber);
+    saveState(this.local);
+    try {
+      const room = await api.completeRound(this.room.roomCode, this.token);
+      this.setRoom(room);
+      this.showToast(`第 ${roundNumber} 轮任务已全部结算`);
+    } catch (_) {
+      this.local.completedRounds = this.local.completedRounds.filter((item) => item !== roundNumber);
+      saveState(this.local);
+    }
   }
 
   startPolling() {
@@ -311,13 +393,25 @@ class TravelSecretGame {
     if (pending.length) saveState(this.local);
   }
 
-  expireTaskIfNeeded() {
-    const task = this.local.activeTask;
-    if (!task || task.expiresAt > Date.now()) return;
-    this.local.history.push({ ...task, status: "expired", resolvedAt: Date.now() });
-    this.local.activeTask = null;
+  archiveActiveTasks(status = "abandoned") {
+    if (!this.local.activeTasks.length) return 0;
+    const resolvedAt = Date.now();
+    this.local.history.push(...this.local.activeTasks.map((task) => ({ ...task, status, resolvedAt })));
+    const count = this.local.activeTasks.length;
+    this.local.activeTasks = [];
+    return count;
+  }
+
+  expireTasksIfNeeded() {
+    const now = Date.now();
+    const expired = this.local.activeTasks.filter((task) => task.expiresAt <= now);
+    if (!expired.length) return;
+    const expiredIds = new Set(expired.map((task) => task.uid));
+    this.local.history.push(...expired.map((task) => ({ ...task, status: "expired", resolvedAt: now })));
+    this.local.activeTasks = this.local.activeTasks.filter((task) => !expiredIds.has(task.uid));
     saveState(this.local);
-    this.showToast("密令已超时，计为 0 分");
+    this.showToast(`${expired.length} 条密令已超时，计为 0 分`);
+    this.markRoundCompleteIfReady();
   }
 
   sharePayload() {
@@ -339,6 +433,10 @@ class TravelSecretGame {
     if (entered === null) return null;
     const name = normalizePlayerName(entered);
     if (!name) this.showToast("请输入 1–12 个字符的昵称");
+    if (name) {
+      try { await checkText(name, 1); }
+      catch (error) { this.showToast(error.message); return null; }
+    }
     return name;
   }
 
@@ -418,6 +516,8 @@ class TravelSecretGame {
     if (entered === null) return;
     const checked = validateHiddenTask(entered);
     if (!checked.value) return this.showToast(checked.error);
+    try { await checkText(checked.value, 2); }
+    catch (error) { return this.showToast(error.message); }
     const accepted = await confirm(
       "确认提交隐藏任务？",
       `${checked.value}\n\n提交后不可修改；设计者本人不会抽到。`,
@@ -431,67 +531,116 @@ class TravelSecretGame {
     });
   }
 
+  openBountyEditor() {
+    if (!this.room?.bountyTask?.isEditor || !this.room.bountyTask.needsSubmission) {
+      return this.showToast("你不是本轮悬赏发布者");
+    }
+    this.screen = "bounty_editor";
+    this.renderer.resetScroll("bounty_editor");
+    this.render();
+  }
+
+  closeBountyEditor() {
+    this.screen = "lobby";
+    this.renderer.resetScroll("lobby");
+    this.render();
+  }
+
+  async editBountyTask() {
+    if (!this.room?.bountyTask?.isEditor || !this.room.bountyTask.needsSubmission) {
+      return this.showToast("悬赏任务已经锁定");
+    }
+    const entered = await promptText(
+      "发布 5 分悬赏",
+      "8–100 字，例如：率先让三位同行一起说出“出发”",
+    );
+    if (entered === null) return;
+    const checked = validateBountyTask(entered);
+    if (!checked.value) return this.showToast(checked.error);
+    try { await checkText(checked.value, 2); }
+    catch (error) { return this.showToast(error.message); }
+    const accepted = await confirm(
+      "确认发布悬赏？",
+      `${checked.value}\n\n所有同行都可以挑战，包括你本人；首位通过见证者获得 5 分。`,
+      "确认发布",
+    );
+    if (!accepted) return;
+    await this.runBusy(async () => {
+      const room = await api.submitBountyTask(this.room.roomCode, this.token, checked.value);
+      this.setRoom(room, "missions");
+      this.showToast(`第 ${room.roundNumber} 轮开始，5 分悬赏已发布`);
+    });
+  }
+
   async drawTask() {
     if (!this.room) return this.showToast("房间尚未同步，请稍后再试");
     if (this.room.status !== "playing") return this.showToast("当前不在密令阶段");
-    if (this.local.activeTask) return this.showToast("请先完成当前密令");
+    if (this.local.activeTasks.length) return this.showToast("请先处理本轮已抽取的三条密令");
+    if (this.local.currentBatchId && this.local.currentRound === this.room.roundNumber) {
+      return this.showToast("本轮已经抽取过，请等待下一轮");
+    }
     const model = this.model();
-    if (model.remainingDraws <= 0) return this.showToast(`抽取额度已用完，${model.drawRefreshLabel}`);
-    try {
+    if (model.remainingDraws < 1) return this.showToast(`抽取组数已用完，${model.drawRefreshLabel}`);
+    await this.runBusy(async () => {
       const presentPlayers = this.room.players.filter((player) => player.present !== false);
       if (!presentPlayers.some((player) => player.id === this.room.self.id)) {
         return this.showToast("请先在房间菜单中重新归队");
       }
+      const now = Date.now();
+      let hiddenMission = null;
       const hidden = this.room.hiddenTask;
       const hiddenAlreadyKnown = hidden?.taskUid && (
-        this.local.activeTask?.uid === hidden.taskUid
+        this.local.activeTasks.some((task) => task.uid === hidden.taskUid)
         || this.local.history.some((record) => record.uid === hidden.taskUid)
       );
       if (hidden?.availableForSelf && hidden.taskUid && !hiddenAlreadyKnown) {
-        await this.runBusy(async () => {
-          const result = await api.takeHiddenTask(this.room.roomCode, this.token);
-          this.local.activeTask = buildHiddenMission(result.task);
-          saveState(this.local);
-          this.setRoom(result.room, "missions");
-          this.showToast("你抽中了本轮唯一的隐藏任务");
-        });
-        return;
+        const result = await api.takeHiddenTask(this.room.roomCode, this.token);
+        hiddenMission = buildHiddenMission(result.task, now, this.room.roundNumber || 1);
+        this.setRoom(result.room, "missions");
       }
-      this.local.activeTask = drawMission({
+      const batch = buildMissionBatch({
         players: presentPlayers,
         selfId: this.room.self.id,
         history: this.local.history,
+        hiddenMission,
+        roundNumber: this.room.roundNumber || 1,
+        now,
       });
-      this.persist();
-    } catch (error) {
-      this.showToast(error.message);
-    }
+      this.local.activeTasks = batch;
+      this.local.currentBatchId = batch[0].batchId;
+      this.local.currentRound = this.room.roundNumber || 1;
+      saveState(this.local);
+      this.render();
+      this.showToast(hiddenMission ? "三条密令已揭晓，其中包含本房隐藏任务" : "三条密令已同时揭晓，计时开始");
+    });
   }
 
-  toggleTask() {
-    if (!this.local.activeTask) return;
-    this.local.activeTask.revealed = !this.local.activeTask.revealed;
+  toggleTask(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task) return;
+    task.revealed = !task.revealed;
     this.persist();
   }
 
-  openWitnessPicker() {
-    if (!this.local.activeTask || !this.room) return;
+  openWitnessPicker(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task || !this.room) return;
     const options = this.room.players
       .filter((player) => player.id !== this.room.self.id)
       .map((player) => ({
         label: `${player.seat}号 · ${player.name}${player.online ? "" : "（暂离）"}`,
         value: player.id,
       }));
-    this.overlayPicker = { type: "witness", title: "谁来见证这次密令？", options, help: "对方将在自己的手机上确认" };
+    this.overlayPicker = { type: "witness", taskUid, title: "谁来见证这次密令？", options, help: "对方将在自己的手机上确认" };
     this.render();
   }
 
-  async completeTask(witnessId) {
-    const task = this.local.activeTask;
+  async completeTask(taskUid, witnessId) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
     if (!task) return;
     const record = { ...task, revealed: true, status: "submit_pending", witnessId, resolvedAt: Date.now() };
     this.local.history.push(record);
-    this.local.activeTask = null;
+    this.local.activeTasks = this.local.activeTasks.filter((item) => item.uid !== task.uid);
     this.overlayPicker = null;
     saveState(this.local);
     this.render();
@@ -509,13 +658,15 @@ class TravelSecretGame {
     });
   }
 
-  async abandonTask() {
-    if (!this.local.activeTask) return;
-    const accepted = await confirm("放弃当前密令？", "这次抽取仍会计入今日次数，并记为 0 分。", "放弃");
+  async abandonTask(taskUid) {
+    const task = this.local.activeTasks.find((item) => item.uid === taskUid);
+    if (!task) return;
+    const accepted = await confirm("放弃这条密令？", "本条会记为 0 分，其余两条不受影响。", "放弃");
     if (!accepted) return;
-    this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-    this.local.activeTask = null;
+    this.local.history.push({ ...task, status: "abandoned", resolvedAt: Date.now() });
+    this.local.activeTasks = this.local.activeTasks.filter((item) => item.uid !== task.uid);
     this.persist();
+    this.markRoundCompleteIfReady();
   }
 
   async resolveClaim(claimId, approved) {
@@ -532,7 +683,37 @@ class TravelSecretGame {
     });
   }
 
+  openBountyWitnessPicker() {
+    if (!this.room?.bountyTask?.availableToClaim) return this.showToast("悬赏已经被其他同行揭榜");
+    const options = this.room.players
+      .filter((player) => player.id !== this.room.self.id)
+      .map((player) => ({
+        label: `${player.seat}号 · ${player.name}${player.online ? "" : "（暂离）"}`,
+        value: player.id,
+      }));
+    this.overlayPicker = { type: "bounty_witness", title: "谁来见证悬赏完成？", options, help: "最先提交者锁定揭榜资格，见证通过后获得 5 分" };
+    this.render();
+  }
+
+  async claimBounty(witnessId) {
+    this.overlayPicker = null;
+    await this.runBusy(async () => {
+      const room = await api.claimBounty(this.room.roomCode, this.token, witnessId);
+      this.setRoom(room, "missions");
+      this.showToast("已率先揭榜，等待见证后获得 5 分");
+    });
+  }
+
+  async chooseCycleReward(category) {
+    await this.runBusy(async () => {
+      const room = await api.chooseCycleReward(this.room.roomCode, this.token, category);
+      this.setRoom(room, this.screen);
+      this.showToast("四轮奖励已揭晓");
+    });
+  }
+
   async enterReview() {
+    if (!this.room?.canAdvanceRound) return this.showToast("需等待全员任务结算，或等待本轮倒计时结束");
     await this.runBusy(async () => {
       const room = await api.setRoomStatus(this.room.roomCode, this.token, "review", dateKey());
       this.setRoom(room, "review");
@@ -581,9 +762,9 @@ class TravelSecretGame {
 
   async resumeRoom() {
     await this.runBusy(async () => {
-      const room = await api.setRoomStatus(this.room.roomCode, this.token, "playing");
-      this.setRoom(room, "missions");
-      this.showToast("复盘完成，旅程继续");
+      const room = await api.startNextRound(this.room.roomCode, this.token);
+      this.setRoom(room, room.bountyTask?.isEditor ? "bounty_editor" : "lobby");
+      this.showToast(`第 ${room.roundNumber} 轮悬赏发布者已选出`);
     });
   }
 
@@ -639,10 +820,7 @@ class TravelSecretGame {
       await api.deleteRoom(this.room.roomCode, this.token);
       clearInterval(this.pollTimer);
       this.local.session = null;
-      if (this.local.activeTask) {
-        this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-        this.local.activeTask = null;
-      }
+      this.archiveActiveTasks("abandoned");
       this.room = null;
       this.screen = "home";
       saveState(this.local);
@@ -653,22 +831,19 @@ class TravelSecretGame {
   showRules() {
     wx.showModal({
       title: "游侠密令规则",
-      content: "最多保留 3 个抽取额度，每次使用后 6 小时恢复；每条密令限时 2 小时。每个新房间会随机选出一名隐藏任务设计者，任务仅由另一名玩家抽到。完成后指定同行见证。不要执行危险、冒犯、违法、涉及隐私财物或影响陌生人的任务；任何人不舒服都应立即停止。",
+      content: "每轮一次抽取 3 条密令，全部立即揭晓并同时计时 2 小时，可按任意顺序完成并分别指定见证。复盘后，上轮最高分者发布下一轮 5 分悬赏；每 4 轮冠军可在恶搞奖励和荣誉奖励中二选一抽取。所有自定义文字均需通过平台内容安全检查。任何人不舒服都应立即停止。",
       showCancel: false,
       confirmText: "明白",
     });
   }
 
   async leaveLocal() {
-    const taskNotice = this.local.activeTask ? "当前密令会自动放弃，抽取额度仍会按原时间恢复。" : "";
+    const taskNotice = this.local.activeTasks.length ? "尚未结算的密令会自动放弃，抽取额度仍会按原时间恢复。" : "";
     const accepted = await confirm("退出当前房间？", `${taskNotice}只清除本机入口，不会删除房间和排行榜。使用同一台手机重新输入房间号即可回来。`, "退出");
     if (!accepted) return;
     clearInterval(this.pollTimer);
     this.local.session = null;
-    if (this.local.activeTask) {
-      this.local.history.push({ ...this.local.activeTask, status: "abandoned", resolvedAt: Date.now() });
-      this.local.activeTask = null;
-    }
+    this.archiveActiveTasks("abandoned");
     this.room = null;
     this.screen = "home";
     this.lastRoomStatus = null;
@@ -696,11 +871,16 @@ class TravelSecretGame {
       open_hidden_editor: () => this.openHiddenEditor(),
       close_hidden_editor: () => this.closeHiddenEditor(),
       edit_hidden_task: () => this.editHiddenTask(),
+      open_bounty_editor: () => this.openBountyEditor(),
+      close_bounty_editor: () => this.closeBountyEditor(),
+      edit_bounty_task: () => this.editBountyTask(),
       room_menu: () => this.roomMenu(),
       draw_task: () => this.drawTask(),
-      toggle_task: () => this.toggleTask(),
-      complete_task: () => this.openWitnessPicker(),
-      abandon_task: () => this.abandonTask(),
+      toggle_task: () => this.toggleTask(payload),
+      complete_task: () => this.openWitnessPicker(payload),
+      abandon_task: () => this.abandonTask(payload),
+      claim_bounty: () => this.openBountyWitnessPicker(),
+      choose_reward: () => this.chooseCycleReward(payload),
       approve_claim: () => this.resolveClaim(payload, true),
       reject_claim: () => this.resolveClaim(payload, false),
       navigate: () => this.navigate(payload),
@@ -713,7 +893,8 @@ class TravelSecretGame {
       leave_local: () => this.leaveLocal(),
       close_picker: () => { this.overlayPicker = null; this.render(); },
       picker_select: () => {
-        if (this.overlayPicker?.type === "witness") this.completeTask(payload);
+        if (this.overlayPicker?.type === "witness") this.completeTask(this.overlayPicker.taskUid, payload);
+        else if (this.overlayPicker?.type === "bounty_witness") this.claimBounty(payload);
         else if (this.overlayPicker?.type === "award") this.awardReview(payload);
         else if (this.overlayPicker?.type === "review") this.saveReviewPreset(payload);
       },
@@ -728,7 +909,9 @@ module.exports = {
   REVIEW_PRESETS,
   normalizePlayerName,
   validateHiddenTask,
+  validateBountyTask,
   buildHiddenMission,
+  buildMissionBatch,
   formatReviewDate,
   timeLeft,
   timeUntil,
@@ -756,12 +939,20 @@ const ERROR_MESSAGES = {
   INVALID_PLAY_DATE: "任务日期无效",
   DAILY_LIMIT: "最近6小时内已提交3次计分，请稍后再试",
   PENDING_CLAIMS: "还有待见证任务，确认后才能结束旅程",
+  ROUND_NOT_READY: "还有同行尚未完成本轮任务，且倒计时尚未结束",
   HIDDEN_TASK_EDITOR_ONLY: "只有本轮抽中的设计者可以编辑隐藏任务",
   HIDDEN_TASK_LOCKED: "隐藏任务已经提交，不能再次修改",
   HIDDEN_TASK_NOT_ASSIGNED: "这条隐藏任务不属于你",
   HIDDEN_TASK_NOT_READY: "隐藏任务尚未准备完成",
   INVALID_HIDDEN_TASK: "隐藏任务需填写 8–80 个字符",
   UNSAFE_HIDDEN_TASK: "任务包含不适合旅行游戏的内容，请重新设计",
+  BOUNTY_EDITOR_ONLY: "只有本轮获得资格的玩家可以发布悬赏",
+  BOUNTY_LOCKED: "本轮悬赏已经发布，不能再次修改",
+  BOUNTY_ALREADY_CLAIMED: "这条悬赏已被其他同行率先揭榜",
+  INVALID_BOUNTY_TASK: "悬赏任务需填写 8–100 个合规字符",
+  UNSAFE_BOUNTY_TASK: "悬赏内容涉及安全或他人边界，请重新设计",
+  REWARD_WINNER_ONLY: "只有本次四轮冠军可以抽选奖励",
+  INVALID_REWARD_CATEGORY: "请选择恶搞奖励或荣誉奖励",
 };
 
 function friendlyError(payload, fallback = "联机操作失败") {
@@ -821,6 +1012,33 @@ module.exports = {
   takeHiddenTask(code, token) {
     return rpc("take_secret_hidden_task", { p_room_code: code, p_device_token: token });
   },
+  submitBountyTask(code, token, description) {
+    return rpc("submit_secret_bounty_task", {
+      p_room_code: code,
+      p_device_token: token,
+      p_description: description,
+    });
+  },
+  claimBounty(code, token, witnessId) {
+    return rpc("claim_secret_bounty", {
+      p_room_code: code,
+      p_device_token: token,
+      p_witness_id: witnessId,
+    });
+  },
+  completeRound(code, token) {
+    return rpc("complete_secret_round", { p_room_code: code, p_device_token: token });
+  },
+  startNextRound(code, token) {
+    return rpc("start_secret_next_round", { p_room_code: code, p_device_token: token });
+  },
+  chooseCycleReward(code, token, category) {
+    return rpc("choose_secret_cycle_reward", {
+      p_room_code: code,
+      p_device_token: token,
+      p_category: category,
+    });
+  },
   setPresence(code, token, present) {
     return rpc("set_secret_presence", { p_room_code: code, p_device_token: token, p_present: present });
   },
@@ -875,12 +1093,46 @@ module.exports = {
   supabaseAnonKey: "sb_publishable_ApR8zOwmhO1329Zk4lUBSw_g-DnN-Fy",
   pollIntervalMs: 5000,
   drawLimit: 3,
+  batchSize: 3,
   drawRefreshMs: 6 * 60 * 60 * 1000,
   taskExpiryMs: 2 * 60 * 60 * 1000,
 };
 
 },
 4: function(module, exports, __require) {
+const LOCAL_BLOCKLIST = /(习近平|共产党|六四|色情|成人视频|裸聊|性交易|强奸|乱伦|赌博|博彩|下注|毒品|冰毒|海洛因|枪支|炸弹|恐怖主义|自杀|杀人|砍人|诈骗|洗钱|代开发票|辱骂|歧视|纳粹|邪教|加微信|联系方式|手机号|身份证|银行卡|密码|转账|付款|偷拍|陌生人)/i;
+
+function localTextAllowed(value) {
+  const text = String(value || "").trim();
+  return Boolean(text) && !/[\u0000-\u001f\u007f]/.test(text) && !LOCAL_BLOCKLIST.test(text);
+}
+
+async function checkText(value, scene = 2) {
+  const content = String(value || "").trim();
+  if (!localTextAllowed(content)) throw new Error("内容包含不适合公开展示的信息，请修改后重试");
+  if (!wx.cloud?.callFunction) throw new Error("内容安全服务暂不可用，请稍后重试");
+
+  let response;
+  try {
+    response = await wx.cloud.callFunction({
+      name: "contentSecurity",
+      data: { content, scene },
+    });
+  } catch (_) {
+    throw new Error("内容安全检查失败，请检查网络后重试");
+  }
+
+  const result = response?.result || {};
+  if (!result.ok || result.suggest !== "pass") {
+    throw new Error("内容未通过平台安全检查，请修改后重试");
+  }
+  return true;
+}
+
+module.exports = { LOCAL_BLOCKLIST, checkText, localTextAllowed };
+
+},
+5: function(module, exports, __require) {
 const WORDS = [
   "随便", "等一下", "我看看", "真的", "可以", "确定", "不知道", "没问题",
   "好像", "原来", "马上", "应该", "可能", "当然", "没关系", "再看看",
@@ -1061,7 +1313,7 @@ function drawMission({ players, selfId, history = [], random = Math.random, now 
 module.exports = { TASKS, WORDS, dateKey, drawMission, playerLabel };
 
 },
-5: function(module, exports, __require) {
+6: function(module, exports, __require) {
 const STORAGE_KEY = "travel-secret-minigame-v1";
 const DEVICE_KEY = "travel-secret-minigame-device-v1";
 
@@ -1101,11 +1353,14 @@ function deviceToken() {
 
 function defaultState() {
   return {
-    version: 1,
+    version: 2,
     profileName: "",
     session: null,
     desiredCapacity: 8,
-    activeTask: null,
+    activeTasks: [],
+    currentBatchId: null,
+    currentRound: null,
+    completedRounds: [],
     history: [],
     reviewDrafts: {},
   };
@@ -1114,10 +1369,17 @@ function defaultState() {
 function loadState() {
   const defaults = defaultState();
   const saved = loadJson(STORAGE_KEY, null);
-  if (!saved || saved.version !== 1) return defaults;
+  if (!saved) return defaults;
+  const activeTasks = Array.isArray(saved.activeTasks)
+    ? saved.activeTasks
+    : saved.activeTask ? [saved.activeTask] : [];
   return {
     ...defaults,
     ...saved,
+    version: 2,
+    activeTasks,
+    currentBatchId: saved.currentBatchId || activeTasks[0]?.batchId || null,
+    completedRounds: Array.isArray(saved.completedRounds) ? saved.completedRounds : [],
     history: Array.isArray(saved.history) ? saved.history : [],
     reviewDrafts: saved.reviewDrafts || {},
   };
@@ -1130,7 +1392,7 @@ function saveState(state) {
 module.exports = { STORAGE_KEY, defaultState, deviceToken, loadState, saveState };
 
 },
-6: function(module, exports, __require) {
+7: function(module, exports, __require) {
 const COLORS = {
   ink: "#243238",
   muted: "#6c7776",
@@ -1258,6 +1520,7 @@ class GameRenderer {
     if (model.screen === "home") this.drawHome(model);
     else if (model.screen === "lobby") this.drawLobby(model);
     else if (model.screen === "hidden_editor") this.drawHiddenEditor(model);
+    else if (model.screen === "bounty_editor") this.drawBountyEditor(model);
     else if (model.screen === "missions") this.drawMissions(model);
     else if (model.screen === "ranking") this.drawRanking(model);
     else if (model.screen === "review") this.drawReview(model);
@@ -1479,7 +1742,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.2.2 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.3.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -1536,7 +1799,19 @@ class GameRenderer {
     const rows = Math.ceil(room.players.length / 3);
     const actionY = Math.max(this.height - this.safeBottom - 76, routeY + 214 + rows * 86);
     const hidden = room.hiddenTask || { status: "unassigned", isEditor: false };
-    if (hidden.status === "editing" && hidden.isEditor) {
+    const bounty = room.bountyTask || { status: "none", isEditor: false };
+    if (bounty.status === "editing" && bounty.isEditor) {
+      const editorActionY = Math.max(this.height - this.safeBottom - 124, routeY + 214 + rows * 86);
+      this.panel(20, editorActionY - 8, this.width - 40, 116, COLORS.redSoft, "#d7aaa5", 8);
+      this.icon("seal", 44, editorActionY + 18, COLORS.red, 22);
+      this.text(`你是第 ${room.roundNumber} 轮悬赏发布者`, 64, editorActionY + 10, 14, COLORS.ink, "left", "700");
+      this.text("上一轮得分领先，发布者本人也可挑战", 64, editorActionY + 34, 11, COLORS.redDark, "left", "400");
+      this.button({ x: 34, y: editorActionY + 54, width: this.width - 68, height: 44, label: "查看安全约定并发布", action: "open_bounty_editor", icon: "seal" });
+    } else if (bounty.status === "editing") {
+      this.panel(20, actionY, this.width - 40, 66, COLORS.redSoft, "#d7aaa5", 8);
+      this.text(`第 ${room.roundNumber} 轮悬赏设计中`, 36, actionY + 22, 14, COLORS.redDark, "left", "700");
+      this.text("发布后本轮三任务与 5 分悬赏同时开启", 36, actionY + 45, 11, COLORS.muted, "left", "400");
+    } else if (hidden.status === "editing" && hidden.isEditor) {
       const editorActionY = Math.max(this.height - this.safeBottom - 124, routeY + 214 + rows * 86);
       this.panel(20, editorActionY - 8, this.width - 40, 116, COLORS.goldSoft, "#ddc38c", 8);
       this.icon("seal", 44, editorActionY + 18, COLORS.red, 22);
@@ -1592,12 +1867,47 @@ class GameRenderer {
     this.drawHeader(model, "设计隐藏任务");
   }
 
+  drawBountyEditor(model) {
+    this.drawHeader(model, "发布悬赏任务");
+    let y = this.headerHeight + 18;
+    this.panel(20, y, this.width - 40, 76, COLORS.redSoft, "#d7aaa5", 8);
+    this.icon("seal", 46, y + 38, COLORS.red, 25);
+    this.text(`第 ${model.room.roundNumber} 轮 · 5 分悬赏`, 68, y + 25, 15, COLORS.redDark, "left", "700");
+    this.text("所有人可挑战，首位见证通过者得分", 68, y + 51, 11, COLORS.muted, "left", "400");
+    y += 94;
+
+    this.panel(20, y, this.width - 40, 232, COLORS.paper, COLORS.line, 8);
+    this.text("发布边界", 36, y + 28, 15, COLORS.ink, "left", "700");
+    const rules = [
+      "仅限熟人同行和安全公开场景",
+      "不得涉及危险、酒精、隐私或财物",
+      "不得要求骚扰、偷拍或接触陌生人",
+      "发布者本人也可以完成本条悬赏",
+      "提交前会经过微信内容安全检查",
+    ];
+    rules.forEach((rule, index) => {
+      const rowY = y + 62 + index * 31;
+      this.ctx.beginPath(); this.ctx.arc(40, rowY, 3, 0, Math.PI * 2); this.ctx.fillStyle = COLORS.jade; this.ctx.fill();
+      this.text(rule, 52, rowY, 13, index === 4 ? COLORS.redDark : COLORS.ink, "left", index === 4 ? "600" : "400");
+    });
+    y += 248;
+    this.panel(20, y, this.width - 40, 94, COLORS.blueSoft, "#b8cfdb", 8);
+    this.text("合适示例", 36, y + 24, 12, COLORS.blue, "left", "700");
+    this.wrapText("率先让三位同行一起说出“出发”。", 36, y + 53, this.width - 72, 22, 2, { size: 14, color: COLORS.ink, weight: "500" });
+    y += 110;
+    this.button({ x: 20, y, width: this.width - 40, height: 52, label: "我已理解，填写悬赏", action: "edit_bounty_task", icon: "check" });
+    this.hit("close_bounty_editor", this.width / 2 - 72, y + 62, 144, 38);
+    this.icon("back", this.width / 2 - 50, y + 81, COLORS.muted, 16);
+    this.text("返回同行大厅", this.width / 2 + 8, y + 81, 12, COLORS.muted, "center", "500");
+    this.drawHeader(model, "发布悬赏任务");
+  }
+
   drawScoreStrip(model, y) {
     const self = model.room.players.find((player) => player.id === model.room.self.id);
     const values = [
       ["总分", self?.totalScore || 0],
-      ["今日", model.todayApprovedScore],
-      ["剩余", model.remainingDraws],
+      ["本轮", self?.roundScore || 0],
+      ["未结", model.activeTasks.length],
     ];
     this.panel(20, y, this.width - 40, 72, COLORS.paper, COLORS.line, 8);
     const cell = (this.width - 40) / 3;
@@ -1673,27 +1983,85 @@ class GameRenderer {
     return 76;
   }
 
+  drawCycleRewardPanel(reward, y) {
+    if (!reward || reward.status === "none") return 0;
+    if (reward.status === "pending" && reward.isWinner) {
+      this.panel(20, y, this.width - 40, 164, COLORS.goldSoft, "#ddc38c", 8);
+      this.icon("seal", 44, y + 31, COLORS.gold, 22);
+      this.text(`第 ${reward.cycleNumber} 个四轮周期冠军`, 64, y + 24, 14, "#71521c", "left", "700");
+      this.text("选择一类，再随机揭晓具体奖励", 64, y + 49, 11, COLORS.muted, "left", "400");
+      this.button({ x: 34, y: y + 78, width: (this.width - 76) / 2, height: 54, label: "恶搞奖励", action: "choose_reward", payload: "prank", kind: "danger" });
+      this.button({ x: this.width / 2 + 4, y: y + 78, width: (this.width - 76) / 2, height: 54, label: "荣誉奖励", action: "choose_reward", payload: "honor", kind: "gold" });
+      return 176;
+    }
+    const height = reward.status === "revealed" ? 112 : 82;
+    this.panel(20, y, this.width - 40, height, COLORS.goldSoft, "#ddc38c", 8);
+    this.text(`四轮冠军 · ${reward.winnerName}`, 36, y + 25, 13, "#71521c", "left", "700");
+    if (reward.status === "revealed") {
+      this.wrapText(reward.resultText, 36, y + 58, this.width - 72, 22, 2, { size: 15, color: COLORS.ink, weight: "600" });
+    } else {
+      this.text("等待冠军完成二选一抽奖", 36, y + 53, 11, COLORS.muted, "left", "400");
+    }
+    return height + 12;
+  }
+
+  drawBountyPanel(bounty, y) {
+    if (!bounty || ["none", "editing"].includes(bounty.status)) return 0;
+    const height = bounty.status === "ready" ? 164 : 124;
+    this.panel(20, y, this.width - 40, height, COLORS.redSoft, "#d7aaa5", 8);
+    this.icon("seal", 43, y + 28, COLORS.red, 22);
+    this.text("全员悬赏 · 5 分", 62, y + 22, 14, COLORS.redDark, "left", "700");
+    const status = bounty.status === "ready" ? "等待首位揭榜" : bounty.status === "pending" ? `${bounty.claimantName} 已揭榜，等待见证` : `${bounty.claimantName} 已获得 5 分`;
+    this.text(status, this.width - 34, y + 22, 11, bounty.status === "claimed" ? COLORS.jadeDark : COLORS.redDark, "right", "600");
+    this.wrapText(bounty.description || "悬赏内容准备中", 36, y + 58, this.width - 72, 21, 3, { size: 14, color: COLORS.ink, weight: "600" });
+    if (bounty.status === "ready") {
+      this.button({ x: 54, y: y + 106, width: this.width - 108, height: 42, label: "我已完成，率先揭榜", action: "claim_bounty", icon: "check" });
+    }
+    return height + 12;
+  }
+
+  drawBatchTaskCard(task, y, model) {
+    const active = task.status === "active";
+    const height = active ? 224 : 112;
+    const final = ["approved", "rejected", "abandoned", "expired"].includes(task.status);
+    const fill = task.isHidden ? COLORS.redSoft : active ? COLORS.paperWarm : COLORS.paper;
+    this.panel(20, y, this.width - 40, height, fill, task.isHidden ? "#d7aaa5" : COLORS.line, 8);
+    this.text(`第 ${task.batchOrder || 1} 条 · ${task.score} 分${task.isHidden ? " · 隐藏" : ""}`, 36, y + 23, 12, task.isHidden ? COLORS.redDark : COLORS.jadeDark, "left", "700");
+    const statusText = active ? `剩余 ${model.timeLeftFor(task.expiresAt)}` : model.statusLabel(task.status);
+    this.text(statusText, this.width - 36, y + 23, 11, active ? COLORS.gold : task.status === "approved" ? COLORS.jade : COLORS.muted, "right", "600");
+    this.wrapText(task.description, 36, y + 57, this.width - 72, 22, active ? 3 : 2, { size: active ? 15 : 13, color: final ? COLORS.muted : COLORS.ink, weight: active ? "600" : "500" });
+    if (final) {
+      this.ctx.beginPath(); this.ctx.moveTo(34, y + 65); this.ctx.lineTo(this.width - 34, y + 65); this.ctx.strokeStyle = "rgba(108,119,118,0.55)"; this.ctx.stroke();
+    }
+    if (active) {
+      const words = Array.isArray(task.randomWords) && task.randomWords.length ? `随机词：${task.randomWords.join(" / ")}` : `目标：${task.targetName}`;
+      this.text(words, 36, y + 139, 11, COLORS.muted, "left", "500");
+      this.button({ x: 34, y: y + 166, width: 88, height: 42, label: "放弃", action: "abandon_task", payload: task.uid, kind: "danger" });
+      this.button({ x: 132, y: y + 166, width: this.width - 166, height: 42, label: "完成并请见证", action: "complete_task", payload: task.uid, icon: "check" });
+    }
+    return height + 10;
+  }
+
   drawMissions(model) {
-    this.drawHeader(model, "今日密令");
+    this.drawHeader(model, `第 ${model.room.roundNumber || 1} 轮密令`);
     const offset = -this.currentScroll();
     let y = this.headerHeight + 16 + offset;
     this.drawScoreStrip(model, y);
     y += 88;
+
+    y += this.drawCycleRewardPanel(model.room.cycleReward, y);
+    y += this.drawBountyPanel(model.room.bountyTask, y);
 
     for (const claim of model.room.pendingApprovals.slice(0, 3)) {
       this.drawApprovalCard(claim, y);
       y += 122;
     }
 
-    if (model.activeTask) {
-      y += this.drawHiddenTaskPanel(model.activeTask, y);
-      y += this.drawRandomWordPanel(model.activeTask, y);
-      this.drawWoodBoard(20, y, this.width - 40, 300, model.activeTask);
-      y += 314;
-      this.text(`剩余 ${model.taskTimeLeft}`, 20, y + 10, 12, COLORS.muted, "left", "500");
-      this.button({ x: 20, y: y + 30, width: 104, height: 48, label: "放弃", action: "abandon_task", kind: "danger", icon: "close" });
-      this.button({ x: 134, y: y + 30, width: this.width - 154, height: 48, label: "完成并请见证", action: "complete_task", icon: "check" });
-      y += 96;
+    if (model.batchTasks.length) {
+      this.text("本轮三条密令", 20, y + 12, 15, COLORS.ink, "left", "700");
+      this.text(`整组剩余 ${model.batchTimeLeft || "0分钟"}`, this.width - 20, y + 12, 11, COLORS.muted, "right", "500");
+      y += 30;
+      for (const task of model.batchTasks) y += this.drawBatchTaskCard(task, y, model);
     } else {
       this.drawEmptyMission(model, y);
       y += 276;
@@ -1701,7 +2069,7 @@ class GameRenderer {
 
     this.text("最近记录", 20, y + 10, 15, COLORS.ink, "left", "700");
     y += 30;
-    const records = model.history.slice(0, 8);
+    const records = model.history.filter((record) => record.batchId !== model.currentBatchId).slice(0, 8);
     if (!records.length) {
       this.text("还没有任务记录", 20, y + 18, 13, COLORS.muted, "left", "400");
       y += 44;
@@ -1716,16 +2084,21 @@ class GameRenderer {
     }
     this.maxScroll = Math.max(0, y - offset - (this.height - this.navHeight - 12));
     this.drawNav(model);
-    this.drawHeader(model, "今日密令");
+    this.drawHeader(model, `第 ${model.room.roundNumber || 1} 轮密令`);
   }
 
   drawEmptyMission(model, y) {
     this.panel(20, y, this.width - 40, 250, COLORS.paper, COLORS.line, 8);
-    this.icon("seal", this.width / 2, y + 72, model.remainingDraws ? COLORS.red : COLORS.muted, 52);
-    const title = model.remainingDraws ? "抽取一份私密任务" : "抽取额度已用完";
+    const alreadyDrew = Boolean(model.currentBatchId);
+    const canDraw = model.remainingDraws >= 1 && !alreadyDrew;
+    this.icon("seal", this.width / 2, y + 72, canDraw ? COLORS.red : COLORS.muted, 52);
+    const title = canDraw ? "一次抽取三条私密任务" : alreadyDrew ? "本轮任务已结算" : "正在恢复抽取组数";
     this.text(title, this.width / 2, y + 122, 19, COLORS.ink, "center", "700");
-    this.text(model.remainingDraws ? `还剩 ${model.remainingDraws} 次 · 每次使用后 6 小时恢复` : model.drawRefreshLabel, this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
-    this.button({ x: 54, y: y + 178, width: this.width - 108, height: 50, label: "随机抽取", action: "draw_task", icon: "dice", disabled: model.remainingDraws <= 0 });
+    const help = alreadyDrew
+      ? "等待全员结算后，房主开启下一轮"
+      : canDraw ? "三条同时揭晓，同时开始两小时计时" : `当前 ${model.remainingDraws}/3 组 · ${model.drawRefreshLabel}`;
+    this.text(help, this.width / 2, y + 150, 12, COLORS.muted, "center", "400");
+    this.button({ x: 54, y: y + 178, width: this.width - 108, height: 50, label: "抽取本轮三条密令", action: "draw_task", icon: "dice", disabled: !canDraw });
   }
 
   drawNav(model) {
@@ -1759,8 +2132,12 @@ class GameRenderer {
     let y = this.headerHeight + 18 + offset;
     this.panel(20, y, this.width - 40, 62, model.room.status === "ended" ? COLORS.goldSoft : COLORS.jadeSoft, null, 8);
     this.text(STATUS_LABELS[model.room.status], 36, y + 22, 12, model.room.status === "ended" ? "#71521c" : COLORS.jadeDark, "left", "600");
-    this.text(`${model.room.players.length} 位同行`, 36, y + 43, 11, COLORS.muted, "left", "400");
-    this.text("得分", this.width - 36, y + 32, 12, COLORS.muted, "right", "500");
+    const presentCount = model.room.players.filter((player) => player.present !== false).length;
+    const roundStatus = model.room.status === "playing"
+      ? `第 ${model.room.roundNumber} 轮 · ${model.room.roundDoneCount || 0}/${presentCount} 人已结算`
+      : `${model.room.players.length} 位同行`;
+    this.text(roundStatus, 36, y + 43, 11, COLORS.muted, "left", "400");
+    this.text("总分 / 本轮", this.width - 36, y + 32, 11, COLORS.muted, "right", "500");
     y += 78;
 
     model.ranking.forEach((player, index) => {
@@ -1773,12 +2150,15 @@ class GameRenderer {
       this.text(`${player.seat}号 · ${player.name}`, 72, y + height / 2 - 10, 14, COLORS.ink, "left", "600");
       const stateLabel = player.present === false ? "暂离本轮" : player.online ? "在线" : "在场";
       this.text(stateLabel, 72, y + height / 2 + 13, 10, player.present === false ? COLORS.red : player.online ? COLORS.jade : COLORS.muted, "left", "500");
-      this.text(player.totalScore, this.width - 40, y + height / 2, 24, COLORS.ink, "right", "700");
+      this.text(`${player.totalScore} / ${player.roundScore || 0}`, this.width - 40, y + height / 2, 19, COLORS.ink, "right", "700");
       y += height + 8;
     });
 
     if (model.room.self.isOwner && model.room.status === "playing") {
-      this.button({ x: 20, y: y + 8, width: this.width - 40, height: 48, label: "进入今日复盘", action: "enter_review", kind: "secondary", icon: "review" });
+      const reviewLabel = model.room.canAdvanceRound
+        ? `开启第 ${model.room.roundNumber} 轮复盘`
+        : `等待全员结算 · ${model.roundTimeLeft || "即将结束"}`;
+      this.button({ x: 20, y: y + 8, width: this.width - 40, height: 48, label: reviewLabel, action: "enter_review", kind: "secondary", icon: "review", disabled: !model.room.canAdvanceRound });
       y += 68;
     }
     if (model.room.self.isOwner && model.room.status !== "ended") {
@@ -1800,15 +2180,15 @@ class GameRenderer {
   }
 
   drawReview(model) {
-    this.drawHeader(model, "每日复盘");
+    this.drawHeader(model, "本轮复盘");
     const offset = -this.currentScroll();
     let y = this.headerHeight + 18 + offset;
     if (model.room.status !== "review") {
       this.panel(20, y, this.width - 40, 154, COLORS.paper, COLORS.line, 8);
       this.icon("review", this.width / 2, y + 44, COLORS.blue, 32);
-      this.text("尚未进入复盘", this.width / 2, y + 83, 18, COLORS.ink, "center", "700");
-      this.text("房主可从总榜开启今日复盘", this.width / 2, y + 111, 12, COLORS.muted, "center", "400");
-      if (model.room.self.isOwner) this.button({ x: 54, y: y + 166, width: this.width - 108, height: 48, label: "开启复盘", action: "enter_review", icon: "review" });
+      this.text("尚未进入本轮复盘", this.width / 2, y + 83, 18, COLORS.ink, "center", "700");
+      this.text("全员结算或倒计时结束后，房主可开启", this.width / 2, y + 111, 12, COLORS.muted, "center", "400");
+      if (model.room.self.isOwner) this.button({ x: 54, y: y + 166, width: this.width - 108, height: 48, label: "开启复盘", action: "enter_review", icon: "review", disabled: !model.room.canAdvanceRound });
       y += 232;
     } else {
       this.panel(20, y, this.width - 40, 66, COLORS.blueSoft, "#b8cfdb", 8);
@@ -1834,13 +2214,13 @@ class GameRenderer {
       if (model.room.self.isOwner) {
         const hasWinner = notes.some((item) => item.isWinner);
         this.button({ x: 20, y: y + 6, width: this.width - 40, height: 48, label: hasWinner ? "今日最佳已选" : "选择今日最佳", action: "award_review", kind: "gold", icon: "seal", disabled: hasWinner || !notes.length });
-        this.button({ x: 20, y: y + 64, width: this.width - 40, height: 48, label: "完成复盘，继续旅程", action: "resume_room", icon: "check" });
+        this.button({ x: 20, y: y + 64, width: this.width - 40, height: 48, label: `完成复盘，开启第 ${model.room.roundNumber + 1} 轮`, action: "resume_room", icon: "check" });
         y += 130;
       }
     }
     this.maxScroll = Math.max(0, y - offset - (this.height - this.navHeight - 12));
     this.drawNav(model);
-    this.drawHeader(model, "每日复盘");
+    this.drawHeader(model, "本轮复盘");
   }
 
   drawPicker(picker) {

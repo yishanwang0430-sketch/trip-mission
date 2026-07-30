@@ -37,11 +37,14 @@ function deviceToken() {
 
 function defaultState() {
   return {
-    version: 1,
+    version: 2,
     profileName: "",
     session: null,
     desiredCapacity: 8,
-    activeTask: null,
+    activeTasks: [],
+    currentBatchId: null,
+    currentRound: null,
+    completedRounds: [],
     history: [],
     reviewDrafts: {},
   };
@@ -50,10 +53,17 @@ function defaultState() {
 function loadState() {
   const defaults = defaultState();
   const saved = loadJson(STORAGE_KEY, null);
-  if (!saved || saved.version !== 1) return defaults;
+  if (!saved) return defaults;
+  const activeTasks = Array.isArray(saved.activeTasks)
+    ? saved.activeTasks
+    : saved.activeTask ? [saved.activeTask] : [];
   return {
     ...defaults,
     ...saved,
+    version: 2,
+    activeTasks,
+    currentBatchId: saved.currentBatchId || activeTasks[0]?.batchId || null,
+    completedRounds: Array.isArray(saved.completedRounds) ? saved.completedRounds : [],
     history: Array.isArray(saved.history) ? saved.history : [],
     reviewDrafts: saved.reviewDrafts || {},
   };

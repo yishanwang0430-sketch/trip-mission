@@ -76,6 +76,7 @@ async function run() {
       ...member,
       room: await rpc("get_secret_room", { p_room_code: code, p_device_token: member.token }),
     })));
+    const tokenByPlayerId = new Map(playingViews.map((member) => [member.room.self.id, member.token]));
     const assignee = playingViews.find((member) => member.room.hiddenTask.availableForSelf);
     assert.ok(assignee);
     assert.notEqual(assignee.token, editor.token);
@@ -176,6 +177,11 @@ async function run() {
       p_played_on: new Date().toISOString().slice(0, 10),
     }, "DAILY_LIMIT");
 
+    await rpc("complete_secret_round", { p_room_code: code, p_device_token: ownerToken });
+    const roundReady = await rpc("complete_secret_round", { p_room_code: code, p_device_token: witnessToken });
+    assert.equal(roundReady.roundDoneCount, 2);
+    assert.equal(roundReady.canAdvanceRound, true);
+
     const reviewDate = new Date().toISOString().slice(0, 10);
     await rpc("set_secret_room_status", {
       p_room_code: code,
@@ -194,12 +200,90 @@ async function run() {
     assert.equal(awarded.players.find((player) => player.id === awarded.self.id).totalScore, 6);
     assert.equal(awarded.players.find((player) => player.id === witness.id).totalScore, 1);
 
-    await rpc("set_secret_room_status", {
+    const roundTwoLobby = await rpc("start_secret_next_round", {
       p_room_code: code,
       p_device_token: ownerToken,
-      p_status: "playing",
-      p_reviewed_on: null,
     });
+    assert.equal(roundTwoLobby.roundNumber, 2);
+    assert.equal(roundTwoLobby.status, "lobby");
+    assert.equal(roundTwoLobby.bountyTask.status, "editing");
+    assert.equal(roundTwoLobby.bountyTask.editorPlayerId, awarded.self.id);
+
+    const roundTwo = await rpc("submit_secret_bounty_task", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_description: "率先让两位同行一起说出我们出发吧。",
+    });
+    assert.equal(roundTwo.status, "playing");
+    assert.equal(roundTwo.bountyTask.availableToClaim, true);
+
+    const bountyPending = await rpc("claim_secret_bounty", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_witness_id: witness.id,
+    });
+    assert.equal(bountyPending.bountyTask.status, "pending");
+    await expectRpcError("claim_secret_bounty", {
+      p_room_code: code,
+      p_device_token: thirdToken,
+      p_witness_id: witness.id,
+    }, "BOUNTY_ALREADY_CLAIMED");
+
+    const bountyWitnessView = await rpc("get_secret_room", {
+      p_room_code: code,
+      p_device_token: witnessToken,
+    });
+    const bountyClaim = bountyWitnessView.pendingApprovals.find((claim) => claim.claimKind === "bounty");
+    assert.ok(bountyClaim);
+    const bountyApproved = await rpc("resolve_secret_score", {
+      p_room_code: code,
+      p_device_token: witnessToken,
+      p_claim_id: bountyClaim.id,
+      p_approved: true,
+    });
+    assert.equal(bountyApproved.bountyTask.status, "claimed");
+    assert.equal(bountyApproved.players.find((player) => player.id === awarded.self.id).totalScore, 11);
+
+    for (let round = 2; round <= 4; round += 1) {
+      await rpc("complete_secret_round", { p_room_code: code, p_device_token: ownerToken });
+      const ready = await rpc("complete_secret_round", { p_room_code: code, p_device_token: witnessToken });
+      assert.equal(ready.canAdvanceRound, true);
+      await rpc("set_secret_room_status", {
+        p_room_code: code,
+        p_device_token: ownerToken,
+        p_status: "review",
+        p_reviewed_on: reviewDate,
+      });
+      const next = await rpc("start_secret_next_round", {
+        p_room_code: code,
+        p_device_token: ownerToken,
+      });
+      assert.equal(next.roundNumber, round + 1);
+      if (round < 4) {
+        assert.equal(next.bountyTask.status, "editing");
+        const nextEditorToken = tokenByPlayerId.get(next.bountyTask.editorPlayerId);
+        assert.ok(nextEditorToken);
+        await rpc("submit_secret_bounty_task", {
+          p_room_code: code,
+          p_device_token: nextEditorToken,
+          p_description: `第${round + 1}轮率先让两位同行完成一次安全的出发口号。`,
+        });
+      } else {
+        assert.equal(next.cycleReward.cycleNumber, 1);
+        assert.equal(next.cycleReward.status, "pending");
+        assert.equal(next.cycleReward.winnerPlayerId, awarded.self.id);
+      }
+    }
+
+    const reward = await rpc("choose_secret_cycle_reward", {
+      p_room_code: code,
+      p_device_token: ownerToken,
+      p_category: "honor",
+    });
+    assert.equal(reward.cycleReward.status, "revealed");
+    assert.equal(reward.cycleReward.category, "honor");
+    assert.ok(reward.cycleReward.resultText);
+
     const ended = await rpc("set_secret_room_status", {
       p_room_code: code,
       p_device_token: ownerToken,
@@ -209,7 +293,17 @@ async function run() {
     assert.equal(ended.status, "ended");
     deleted = await rpc("delete_secret_room", { p_room_code: code, p_device_token: ownerToken });
     assert.equal(deleted, true);
-    console.log(JSON.stringify({ roomCode: code, players: 3, customNames: true, hiddenTaskAssigned: true, ownerScore: 6, witnessScore: 1, rollingSixHourLimitEnforced: true, deleted }));
+    console.log(JSON.stringify({
+      roomCode: code,
+      players: 3,
+      customNames: true,
+      hiddenTaskAssigned: true,
+      threeTaskRoundProgress: true,
+      bountyScore: 5,
+      fourRoundReward: true,
+      rollingSixHourLimitEnforced: true,
+      deleted,
+    }));
   } finally {
     if (!deleted) console.error(`Smoke room ${code} requires manual cleanup.`);
   }
