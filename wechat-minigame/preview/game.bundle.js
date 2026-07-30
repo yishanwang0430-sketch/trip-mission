@@ -1744,7 +1744,7 @@ class GameRenderer {
     this.button({ x: 20, y: buttonY + 66, width: this.width - 40, height: 54, label: model.inviteCode ? `加入房间 ${model.inviteCode}` : "输入房间号", action: "join_room", kind: "secondary", icon: "seal" });
     this.hit("show_rules", center - 70, buttonY + 136, 140, 40);
     this.text("规则与安全边界", center, buttonY + 156, 13, COLORS.blue, "center", "500");
-    this.text("v1.3.0 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
+    this.text("v1.3.1 · 微信小游戏版", center, this.height - this.safeBottom - 22, 11, "#929a97", "center", "400");
   }
 
   drawHeader(model, title = "游侠密令") {
@@ -2196,7 +2196,7 @@ class GameRenderer {
       this.panel(20, y, this.width - 40, 66, COLORS.blueSoft, "#b8cfdb", 8);
       this.text(model.reviewDateLabel, 36, y + 22, 13, COLORS.blue, "left", "700");
       this.text(`${model.room.reviews.length}/${model.room.players.length} 人已复盘`, 36, y + 45, 11, COLORS.muted, "left", "400");
-      this.button({ x: this.width - 116, y: y + 11, width: 96, height: 44, label: model.myReview ? "修改" : "选择", action: "write_review", kind: "secondary" });
+      this.button({ x: this.width - 124, y: y + 11, width: 96, height: 44, label: model.myReview ? "修改" : "选择", action: "write_review", kind: "secondary" });
       y += 82;
 
       const notes = model.room.reviews;
