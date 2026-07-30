@@ -73,7 +73,7 @@ CLI 部署格式：
 
 ```bash
 /Applications/wechatwebdevtools.app/Contents/MacOS/cli cloud functions deploy \
-  --env <云环境 ID> --names contentSecurity --remote-npm-install \
+  --env cloud1-d2gf8a9rn29f1dbc0 --names contentSecurity --remote-npm-install \
   --project "/Users/wangyaya/Desktop/旅途密令/wechat-minigame" --port 9420 --lang zh
 ```
 
